@@ -1,7 +1,8 @@
-import type {
-  MemoryCell,
-  RegisterName,
-  SimulatorState,
+import {
+  CELL_SIZE,
+  type MemoryCell,
+  type RegisterName,
+  type SimulatorState,
 } from './types'
 
 export const hex = (value: number, digits = 8): string =>
@@ -59,7 +60,27 @@ export const freeCell = (state: SimulatorState, address: number): void => {
     fillKind: null,
     variable: null,
     isAlignment: false,
+    size: CELL_SIZE,
+    sourceInstruction: null,
   })
+}
+
+/**
+ * 把“哪条指令写了这块内存”记到单元上，供单元格详情与悬停提示使用。
+ * 只有真正写内存的指令才应调用它，读取类指令不会覆盖数据来源。
+ */
+export const stampSource = (
+  state: SimulatorState,
+  addresses: number[],
+  assembly: string,
+): void => {
+  for (const address of addresses) {
+    const cell = state.memory.find((candidate) => candidate.address === address)
+    if (cell) {
+      cell.sourceInstruction = assembly
+      cell.size = CELL_SIZE
+    }
+  }
 }
 
 export const syncRegisters = (state: SimulatorState): void => {

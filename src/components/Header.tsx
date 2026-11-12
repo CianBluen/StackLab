@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { currentPhase } from '../simulator/engine'
 import { useSimulatorStore } from '../store/simulatorStore'
 import { CaseLibrary } from './CaseLibrary'
+import { LayoutSwitcher } from './LayoutSwitcher'
 import { Logo } from './Logo'
 
 const statusConfig = {
@@ -93,6 +94,8 @@ export const Header = () => {
             </div>
           )}
         </div>
+
+        <LayoutSwitcher />
 
         <div className="topbar-spacer" />
 

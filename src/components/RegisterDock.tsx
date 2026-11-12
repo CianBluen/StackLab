@@ -46,6 +46,7 @@ export const RegisterDock = () => {
     (store) => store.timeline[store.currentStep].state,
   )
   const focusRegister = useSimulatorStore((store) => store.focusRegister)
+  const focusVariable = useSimulatorStore((store) => store.focusVariable)
   const previous = currentStep > 0 ? timeline[currentStep - 1].state : null
   const chain = state.callStack.map((frame) => frame.name)
 
@@ -79,6 +80,23 @@ export const RegisterDock = () => {
               data-pointer={meta.group === 'pointer'}
               data-focused={focused}
               style={style}
+              role="button"
+              tabIndex={0}
+              onClick={() =>
+                focusVariable({
+                  register,
+                  label: `${meta.label} · ${hex(value, DIGITS[register])} · ${meta.role}`,
+                })
+              }
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                focusVariable({
+                  register,
+                  label: `${meta.label} · ${hex(value, DIGITS[register])} · ${meta.role}`,
+                })
+              }}
+              title={`${meta.label} · ${meta.role} · 点击设为联动焦点`}
               animate={
                 focused
                   ? { borderColor: `${meta.color}aa`, boxShadow: `0 0 20px -6px ${meta.color}88` }

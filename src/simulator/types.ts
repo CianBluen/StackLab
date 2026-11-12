@@ -61,6 +61,10 @@ export interface MemoryCell {
   fillKind?: MemoryFill
   variable?: string | null
   isAlignment?: boolean
+  /** 该单元的大小（字节）。当前模拟器一个栈单元固定为 4 B。 */
+  size: number
+  /** 哪一条指令产生/改变了这个单元，例如 "call main"。 */
+  sourceInstruction: string | null
 }
 
 export interface StackFrame {
@@ -82,6 +86,8 @@ export interface StackFrame {
   callerId: string | null
   status: FrameStatus
   argsBytes?: number
+  /** 该帧被创建时所在的执行步号，用于教学提示“这是第几步的快照”。 */
+  createdStep?: number
 }
 
 export type EffectKind =
@@ -97,6 +103,8 @@ export type EffectKind =
   | 'save-register'
   | 'restore-register'
   | 'fill'
+  | 'os'
+  | 'lea'
   | 'exit'
 
 export interface StepEffect {
@@ -138,6 +146,12 @@ export interface ExecutionContext {
   debugFill: boolean
 }
 
+export interface AddressRef {
+  base: 'ebp' | 'esp'
+  offset: number
+  kind: 'read' | 'write' | 'lea'
+}
+
 export interface Instruction {
   id: string
   address: number
@@ -149,6 +163,12 @@ export interface Instruction {
   explanation: string
   reason: string
   phase?: string
+  /** 需要展示 [ebp−4] 这类有效地址计算时填写；UI 会按当前寄存器值实时换算。 */
+  addressing?: AddressRef | null
+  /** 内核装载、建立初始栈等系统动作，不是 CPU 执行的 x86 指令。 */
+  isSystemAction?: boolean
+  /** 函数序言 / 尾声这类编译器生成、不直接对应 C 语句的指令。 */
+  isPrologue?: boolean
   execute: (state: SimulatorState, context: ExecutionContext) => SimulatorState
 }
 

@@ -1,5 +1,7 @@
 import type {
+  AddressRef,
   CodeGroup,
+  EffectKind,
   ExecutionContext,
   FrameTone,
   Instruction,
@@ -27,10 +29,9 @@ import {
   writeCell,
   writeLocal,
 } from './ops'
-import { hex } from './utils'
+import { hex, stampSource } from './utils'
 
-export type StepOp =
-  | { type: 'push-ebp' }
+export type StepOp =  | { type: 'push-ebp' }
   | { type: 'mov-ebp-esp' }
   | { type: 'pop-ebp' }
   | { type: 'ret' }
@@ -85,6 +86,13 @@ export type StepOp =
       offset: number
       variable?: string
     }
+  | {
+      type: 'lea-reg-mem'
+      register: RegisterName
+      base: 'ebp' | 'esp'
+      offset: number
+      variable?: string
+    }
   | { type: 'add-reg-reg'; dest: RegisterName; source: RegisterName }
   | {
       type: 'sub-esp'
@@ -97,6 +105,16 @@ export type StepOp =
   | { type: 'mov-esp-ebp' }
   | { type: 'xor-reg-reg'; register: RegisterName }
   | { type: 'int'; code: number }
+  | {
+      type: 'os-init-stack'
+      writes: {
+        address: number
+        value: number
+        type: MemoryType
+        label: string
+      }[]
+      label?: string
+    }
   | { type: 'nop'; note?: string }
 
 export interface StepSpec {
@@ -118,6 +136,8 @@ export interface FunctionSpec {
   baseAddress: number
   sourceFunctionId?: string | null
   usesFramePointer?: boolean
+  /** 内核装载这类非 x86 代码分组：UI 会标注“系统动作”。 */
+  isSystem?: boolean
   steps: StepSpec[]
 }
 
@@ -179,6 +199,8 @@ const assemblyFor = (op: StepOp, target?: FunctionSpec): string => {
       return `mov dword ptr ${memOperand('ebp', op.offset)}, ${op.register}`
     case 'add-reg-mem':
       return `add ${op.register}, dword ptr ${memOperand(op.base, op.offset)}`
+    case 'lea-reg-mem':
+      return `lea ${op.register}, ${memOperand(op.base, op.offset)}`
     case 'add-reg-reg':
       return `add ${op.dest}, ${op.source}`
     case 'sub-esp':
@@ -191,6 +213,8 @@ const assemblyFor = (op: StepOp, target?: FunctionSpec): string => {
       return `xor ${op.register}, ${op.register}`
     case 'int':
       return `int 0x${U(op.code)}`
+    case 'os-init-stack':
+      return 'kernel: setup_initial_stack'
     case 'nop':
       return 'nop'
   }
@@ -198,6 +222,7 @@ const assemblyFor = (op: StepOp, target?: FunctionSpec): string => {
 
 const estimateSize = (assembly: string): number => {
   const asm = assembly.trim()
+  if (asm.startsWith('kernel:')) return 0
   if (asm === 'ret' || asm === 'nop') return 1
   if (asm.startsWith('pop ')) return 1
   if (asm.startsWith('push ') && !asm.startsWith('push dword ptr')) {
@@ -208,6 +233,7 @@ const estimateSize = (assembly: string): number => {
   if (asm.startsWith('call ')) return 5
   if (asm.startsWith('int ')) return 2
   if (asm.startsWith('xor ')) return 2
+  if (asm.startsWith('lea ')) return 3
   if (/^mov (ebp, esp|esp, ebp)/.test(asm)) return 2
   if (asm.startsWith('mov dword ptr')) {
     return /, 10$|, 20$|, 30$|, 40$/.test(asm) ? 7 : 3
@@ -219,6 +245,22 @@ const estimateSize = (assembly: string): number => {
   if (asm.startsWith('sub esp,')) return 3
   if (asm.startsWith('and esp,')) return 3
   return 3
+}
+
+const addressingFor = (op: StepOp): AddressRef | null => {
+  switch (op.type) {
+    case 'mov-reg-mem':
+    case 'add-reg-mem':
+    case 'push-mem':
+      return { base: op.base, offset: op.offset, kind: 'read' }
+    case 'mov-mem-imm':
+    case 'mov-mem-reg':
+      return { base: 'ebp', offset: op.offset, kind: 'write' }
+    case 'lea-reg-mem':
+      return { base: op.base, offset: op.offset, kind: 'lea' }
+    default:
+      return null
+  }
 }
 
 const createEffect = (
@@ -347,6 +389,13 @@ const descriptionFor = ({
       explanation = `读取 [EBP ${op.offset}] 中的值，与 ${op.register.toUpperCase()} 相加，结果写回 ${op.register.toUpperCase()}。`
       reason = `${op.register.toUpperCase()} 从 {${op.register}B} 变为 {${op.register}A}。这是寄存器运算，栈内存和 ESP / EBP 不会被修改。`
       break
+    case 'lea-reg-mem':
+      title = op.variable
+        ? `计算 ${op.variable} 的地址并写入 ${op.register.toUpperCase()}`
+        : `计算有效地址并写入 ${op.register.toUpperCase()}`
+      explanation = `lea 只做地址运算，不读取内存内容。它把 ${offsetText(op.offset)} 的计算结果放进 ${op.register.toUpperCase()}，常用于取得局部变量的指针。`
+      reason = `有效地址 = EBP + (${op.offset})。${op.register.toUpperCase()} 从 {${op.register}B} 变为 {${op.register}A}；被指向的栈单元内容保持不变，ESP 也不变。`
+      break
     case 'add-reg-reg':
       title = `${op.dest.toUpperCase()} += ${op.source.toUpperCase()}`
       explanation = `把 ${op.source.toUpperCase()} 的值加到 ${op.dest.toUpperCase()}，结果保存在 ${op.dest.toUpperCase()}。`
@@ -379,6 +428,13 @@ const descriptionFor = ({
       explanation = `int 0x80 进入内核。EAX 中的系统调用号决定操作；本案例使用 exit，EBX 提供退出码。`
       reason = `系统调用不会修改用户栈。程序退出后，所有栈帧都只保留为历史快照；这不是 CPU 自动清零内存。`
       break
+    case 'os-init-stack':
+      title = op.label ?? '操作系统建立初始用户栈'
+      explanation =
+        '这是内核/装载器的动作，不是 CPU 执行的 x86 指令。程序开始运行前，内核已经把 argc、argv、envp、auxv 等启动信息写入新进程的用户栈，并把程序入口地址设为 _start。'
+      reason =
+        '此刻还没有 main 栈帧，也没有 main 的返回地址。栈顶位于 {espA}；下面这些单元属于“进程初始栈”，不是任何 C 函数的局部变量。'
+      break
     case 'nop':
       title = '空操作'
       explanation = 'CPU 不改变任何寄存器或内存。'
@@ -393,14 +449,24 @@ const descriptionFor = ({
   }
 }
 
+const WRITE_EFFECTS: ReadonlySet<EffectKind> = new Set<EffectKind>([
+  'push',
+  'call',
+  'write',
+  'fill',
+  'allocate',
+  'save-register',
+  'os',
+])
+
 const executeOp = (
   state: SimulatorState,
   op: StepOp,
   context: ExecutionContext,
   nextAddress: number,
   target?: FunctionSpec,
-): SimulatorState => {
-  const s = clone(state)
+  assembly = '',
+): SimulatorState => {  const s = clone(state)
   switch (op.type) {
     case 'push-ebp': {
       pushEbp(s)
@@ -547,6 +613,18 @@ const executeOp = (
       })
       break
     }
+    case 'lea-reg-mem': {
+      const address = (op.base === 'ebp' ? s.ebp : s.esp) + op.offset
+      const from = s[op.register]
+      s[op.register] = address
+      s.lastEffect = createEffect(
+        'lea',
+        [address],
+        `${op.register.toUpperCase()} ← &${op.variable ?? 'mem'}`,
+        { register: op.register, from, to: address },
+      )
+      break
+    }
     case 'add-reg-reg': {
       const from = s[op.dest]
       s[op.dest] += s[op.source]
@@ -588,9 +666,37 @@ const executeOp = (
       terminateProcess(s, s.ebx & 0xff)
       break
     }
+    case 'os-init-stack': {
+      // 初始栈数据属于“进程初始栈”区域，不属于当前活动的 _start 帧。
+      const frame =
+        s.callStack.find((candidate) => candidate.functionId === 'kernel') ??
+        activeFrame(s)
+      for (const write of op.writes) {
+        writeCell(s, write.address, {
+          value: write.value,
+          type: write.type,
+          label: write.label,
+          frameId: frame?.id ?? null,
+          isAllocated: true,
+          isInitialized: true,
+        })
+      }
+      s.lastEffect = createEffect(
+        'os',
+        op.writes.map((write) => write.address),
+        op.label ?? '内核建立初始栈',
+      )
+      break
+    }
     case 'nop':
       break
   }
+
+  const effect = s.lastEffect
+  if (effect && effect.addresses.length > 0 && WRITE_EFFECTS.has(effect.kind)) {
+    stampSource(s, effect.addresses, assembly)
+  }
+
   return s
 }
 
@@ -646,8 +752,11 @@ export const buildProgram = (specs: FunctionSpec[]): BuiltProgram => {
         explanation: copy.explanation,
         reason: copy.reason,
         phase: step.phase,
+        addressing: addressingFor(step.op),
+        isSystemAction: step.op.type === 'os-init-stack',
+        isPrologue: step.op.type === 'push-ebp' || step.op.type === 'mov-ebp-esp',
         execute: (state: SimulatorState, context: ExecutionContext) =>
-          executeOp(state, step.op, context, record.nextAddress, target),
+          executeOp(state, step.op, context, record.nextAddress, target, record.assembly),
       } satisfies Instruction
     })
 

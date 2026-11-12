@@ -1101,7 +1101,7 @@
   position: relative;
   z-index: 1;
   display: grid;
-  height: 40px;
+  height: var(--stack-row-h, 40px);
   grid-template-columns: 112px 66px minmax(0, 1fr) 68px 62px 112px;
   align-items: center;
   border-bottom: 1px solid rgba(33, 47, 67, 0.42);
@@ -1784,8 +1784,8 @@
 
 @media (max-height: 840px) {
   .teaching-dock {
-    height: 214px;
-    flex-basis: 214px;
+    height: 238px;
+    flex-basis: 238px;
   }
 
   .workspace-v2 {
@@ -2045,4 +2045,1464 @@
 .stack2-frame-ribbon {
   height: 28px;
   flex-basis: 28px;
+}
+
+/* ------------------------------------------------------------------ */
+/* v3 · 内存单元详情、地址分解、系统动作                                */
+/* ------------------------------------------------------------------ */
+
+.stack2-inspect {
+  position: absolute;
+  z-index: 60;
+  top: 84px;
+  right: 12px;
+  width: 344px;
+  max-height: 62%;
+  overflow: auto;
+  border: 1px solid rgba(77, 157, 255, 0.32);
+  border-radius: 9px;
+  background:
+    radial-gradient(circle at 88% 0%, rgba(77, 157, 255, 0.14), transparent 62%),
+    rgba(13, 20, 31, 0.97);
+  box-shadow: 0 22px 48px -20px rgba(0, 0, 0, 0.95);
+  padding: 10px 12px 11px;
+  backdrop-filter: blur(14px);
+}
+
+.stack2-inspect > button {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: flex;
+  width: 21px;
+  height: 21px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #2c3f5b;
+  border-radius: 5px;
+  background: #16202f;
+  color: #8298b4;
+}
+
+.stack2-inspect > button:hover {
+  border-color: rgba(111, 178, 255, 0.5);
+  color: #d6e7fa;
+}
+
+.stack2-inspect-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #9cc9ff;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.stack2-inspect-badge {
+  border: 1px solid rgba(236, 140, 168, 0.4);
+  border-radius: 3px;
+  background: rgba(236, 140, 168, 0.12);
+  padding: 0 4px;
+  color: #f1a6bc;
+  font-size: 7px;
+  letter-spacing: 0.04em;
+}
+
+.stack2-inspect-badge[data-tone='freed'] {
+  border-color: rgba(142, 164, 191, 0.4);
+  background: rgba(142, 164, 191, 0.12);
+  color: #a9bacd;
+}
+
+.stack2-inspect-grid {
+  display: grid;
+  margin-top: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 6px;
+}
+
+.stack2-inspect-row {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+  border: 1px solid rgba(45, 62, 85, 0.5);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 3px 6px;
+}
+
+.stack2-inspect-row span {
+  color: #6d8098;
+  font-size: 7.2px;
+  letter-spacing: 0.05em;
+}
+
+.stack2-inspect-row b {
+  overflow-wrap: anywhere;
+  color: #dce8f6;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 8.4px;
+  font-weight: 500;
+}
+
+.stack2-inspect-note {
+  margin: 7px 0 0;
+  color: #93a6bd;
+  font-size: 8.4px;
+  line-height: 1.65;
+}
+
+.stack2-inspect-note code {
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0 2px;
+  color: #bcd6f2;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 8px;
+}
+
+.stack2-call-tag {
+  border: 1px solid rgba(77, 157, 255, 0.55);
+  border-radius: 3px;
+  background: rgba(77, 157, 255, 0.18);
+  padding: 0 4px;
+  color: #a8d2ff;
+  font-size: 7px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  animation: stack2-call-tag 1.1s ease-out;
+}
+
+@keyframes stack2-call-tag {
+  0% {
+    transform: scale(0.82);
+    box-shadow: 0 0 16px -2px rgba(77, 157, 255, 0.9);
+  }
+  60% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(77, 157, 255, 0);
+  }
+}
+
+.stack2-row[data-call='true'] {
+  animation: stack2-call-row 1s ease-out;
+}
+
+@keyframes stack2-call-row {
+  0% {
+    box-shadow:
+      inset 0 0 0 1px rgba(77, 157, 255, 0.8),
+      0 0 26px -4px rgba(77, 157, 255, 0.7);
+  }
+  100% {
+    box-shadow:
+      inset 0 0 0 1px rgba(77, 157, 255, 0),
+      0 0 0 0 rgba(77, 157, 255, 0);
+  }
+}
+
+/* 指令面板 · 地址分解 */
+.addr-calc {
+  display: flex;
+  margin-top: 6px;
+  align-items: center;
+  gap: 8px;
+  border: 1px dashed rgba(77, 157, 255, 0.32);
+  border-radius: 6px;
+  background: rgba(77, 157, 255, 0.06);
+  padding: 3px 8px;
+}
+
+.addr-calc-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #8bc4ff;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.addr-calc-formula {
+  color: #a9c4e0;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 9px;
+}
+
+.addr-calc-formula b {
+  color: #eef6ff;
+  font-weight: 600;
+}
+
+.addr-calc-note {
+  margin-left: auto;
+  color: #5f7691;
+  font-size: 7.4px;
+}
+
+.addr-calc[data-kind='write'] {
+  border-color: rgba(55, 217, 155, 0.3);
+  background: rgba(55, 217, 155, 0.06);
+}
+
+.addr-calc[data-kind='write'] .addr-calc-kind {
+  color: #63e0b0;
+}
+
+.addr-calc[data-kind='lea'] {
+  border-color: rgba(178, 140, 255, 0.3);
+  background: rgba(178, 140, 255, 0.07);
+}
+
+.addr-calc[data-kind='lea'] .addr-calc-kind {
+  color: #b28cff;
+}
+
+.dock-system {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(142, 164, 191, 0.4);
+  border-radius: 4px;
+  background: rgba(142, 164, 191, 0.1);
+  padding: 1px 5px;
+  color: #b6c6da;
+  font-size: 7.4px;
+  letter-spacing: 0.04em;
+}
+
+/* 汇编面板 · 内核系统动作 */
+.code-system-chip {
+  border: 1px solid rgba(142, 164, 191, 0.42);
+  border-radius: 3px;
+  background: rgba(142, 164, 191, 0.12);
+  padding: 0 4px;
+  color: #b6c6da;
+  font-size: 6.8px;
+  letter-spacing: 0.04em;
+}
+
+.code-system-badge {
+  margin-left: auto;
+  flex: 0 0 auto;
+  border: 1px solid rgba(142, 164, 191, 0.35);
+  border-radius: 3px;
+  background: rgba(142, 164, 191, 0.08);
+  padding: 0 4px;
+  color: #9fb1c7;
+  font-size: 6.8px;
+}
+
+.code-system-inline {
+  display: inline-block;
+  margin-top: 1px;
+  border: 1px solid rgba(142, 164, 191, 0.3);
+  border-radius: 3px;
+  background: rgba(142, 164, 191, 0.08);
+  padding: 0 4px;
+  color: #93a6bd;
+  font-size: 6.6px;
+  font-style: normal;
+  letter-spacing: 0.03em;
+}
+
+.code-line[data-system='true'] .code-asm {
+  color: #c3d2e3;
+  font-style: italic;
+}
+
+/* ------------------------------------------------------------------ */
+/* v3 · 布局切换                                                       */
+/* ------------------------------------------------------------------ */
+
+.layout-switch {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  border: 1px solid rgba(61, 96, 137, 0.45);
+  border-radius: 7px;
+  background: rgba(10, 16, 26, 0.6);
+  padding: 2px;
+}
+
+.layout-switch-btn {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  gap: 4px;
+  border-radius: 5px;
+  padding: 0 7px;
+  color: #7f94ad;
+  font-size: 8px;
+  font-weight: 500;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.layout-switch-btn:hover {
+  color: #c6dcf4;
+}
+
+.layout-switch-btn[data-active='true'] {
+  background: rgba(77, 157, 255, 0.18);
+  color: #cfe6ff;
+  box-shadow: inset 0 0 0 1px rgba(77, 157, 255, 0.42);
+}
+
+/* ================================================================== */
+/* v5 · 动态页：左栈 / 右 C+汇编+讲解 / 底寄存器                        */
+/* ================================================================== */
+
+.workspace-v2.workspace-dynamic {
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  padding: 12px 16px 10px;
+}
+
+.dyn-right {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dyn-right .panel-header {
+  height: 33px;
+  flex-basis: 33px;
+}
+
+.dyn-right .panel-title {
+  font-size: 10.5px;
+}
+
+.dyn-right .panel-subtitle {
+  font-size: 6.8px;
+}
+
+.dyn-right .c-source-panel {
+  flex: 0 1 200px;
+  min-height: 118px;
+}
+
+.dyn-right .code-panel {
+  flex: 1 1 160px;
+  min-height: 104px;
+}
+
+.dyn-right .instruction-panel {
+  flex: 0 0 204px;
+  min-height: 0;
+}
+
+.dyn-right .instruction-panel .instruction-body {
+  overflow: hidden;
+}
+
+.dyn-right .instruction-panel .instruction-text {
+  -webkit-line-clamp: 2;
+}
+
+.dyn-right .intro-suggestion,
+.dyn-right .code-file-tab,
+.dyn-right .code-source-badge {
+  display: none;
+}
+
+.dyn-right .code-line {
+  min-height: 28px;
+}
+
+.dynamic-registers {
+  display: flex;
+  height: 72px;
+  min-height: 0;
+  flex: 0 0 72px;
+  padding: 0 16px 8px;
+}
+
+.dynamic-registers .register-dock {
+  flex: 1;
+}
+
+.dynamic-registers .register-dock > .panel-header,
+.dynamic-registers .register-abi-note {
+  display: none;
+}
+
+.dynamic-registers .register-grid {
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+  gap: 6px;
+  padding: 7px 8px;
+}
+
+/* ------------------------------------------------------------------ */
+/* C 源码窗口                                                          */
+/* ------------------------------------------------------------------ */
+
+.c-source-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 0;
+}
+
+.c-source-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.c-source-fn {
+  border: 1px solid rgba(77, 157, 255, 0.3);
+  border-radius: 3px;
+  background: rgba(77, 157, 255, 0.08);
+  padding: 0 5px;
+  color: #9cc9ff;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 7.4px;
+  white-space: nowrap;
+}
+
+.c-source-line {
+  border: 1px solid rgba(244, 184, 96, 0.3);
+  border-radius: 3px;
+  background: rgba(244, 184, 96, 0.08);
+  padding: 0 5px;
+  color: #f0c77e;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 7.4px;
+}
+
+.c-source-line[data-empty='true'] {
+  border-color: rgba(142, 164, 191, 0.3);
+  background: rgba(142, 164, 191, 0.08);
+  color: #9fb1c7;
+}
+
+.c-source-strip {
+  display: flex;
+  height: 21px;
+  flex: 0 0 21px;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(40, 56, 78, 0.52);
+  background: rgba(9, 14, 22, 0.72);
+  padding: 0 9px;
+  color: #7d93ad;
+  font-size: 7.3px;
+  white-space: nowrap;
+}
+
+.c-source-strip[data-empty='true'] {
+  color: #8f9bb0;
+  background: rgba(18, 22, 32, 0.7);
+}
+
+.c-source-strip[data-prologue='true'] {
+  color: #b6a06a;
+  background: rgba(244, 184, 96, 0.07);
+}
+
+.c-source-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  background: #080d15;
+}
+
+.c-source-code {
+  padding: 3px 0 6px;
+}
+
+.c-source-row {
+  position: relative;
+  display: grid;
+  height: 19px;
+  align-items: center;
+  grid-template-columns: 26px 6px minmax(0, 1fr) auto;
+  gap: 5px;
+  padding: 0 8px 0 4px;
+  border-left: 2px solid transparent;
+}
+
+.c-source-row[data-active-function='true'] {
+  background: rgba(77, 157, 255, 0.035);
+}
+
+.c-source-row[data-current='true'] {
+  border-left-color: #f4b860;
+  background: linear-gradient(90deg, rgba(244, 184, 96, 0.16), rgba(244, 184, 96, 0.03) 70%);
+}
+
+.c-source-row[data-blank='true'] {
+  height: 12px;
+}
+
+.c-source-lineno {
+  color: #41556c;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 7.4px;
+  text-align: right;
+}
+
+.c-source-row[data-current='true'] .c-source-lineno {
+  color: #f0c77e;
+}
+
+.c-source-marker {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #2c3d52;
+}
+
+.c-source-row[data-current='true'] .c-source-marker {
+  background: #f4b860;
+  box-shadow: 0 0 6px #f4b860;
+}
+
+.c-source-text {
+  overflow: hidden;
+  color: #b9cbdd;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 9.2px;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.c-source-text .c-keyword {
+  color: #8fb6ff;
+}
+
+.c-source-text .c-number {
+  color: #e6c07b;
+}
+
+.c-source-text .c-string {
+  color: #8fd6b4;
+}
+
+.c-source-text .c-ident {
+  color: #cfe0f2;
+}
+
+.c-source-text .c-variable {
+  border-radius: 2px;
+  padding: 0 1px;
+  color: #7fe0bb;
+  text-decoration: underline dotted rgba(127, 224, 187, 0.45);
+}
+
+.c-source-text .c-variable:hover {
+  background: rgba(127, 224, 187, 0.16);
+}
+
+.c-source-text .c-variable.is-register {
+  color: #d7c36a;
+  text-decoration-color: rgba(215, 195, 106, 0.5);
+}
+
+.c-source-fnchip {
+  border: 1px solid rgba(142, 164, 191, 0.28);
+  border-radius: 3px;
+  background: rgba(142, 164, 191, 0.08);
+  padding: 0 4px;
+  color: #8ea4bf;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 6.4px;
+}
+
+.c-source-notice {
+  flex: 0 0 auto;
+  border-top: 1px solid rgba(52, 72, 98, 0.5);
+  background: rgba(244, 184, 96, 0.06);
+  padding: 3px 9px;
+  color: #d9b978;
+  font-size: 7.4px;
+}
+
+/* ------------------------------------------------------------------ */
+/* 动态栈面板                                                          */
+/* ------------------------------------------------------------------ */
+
+.dyn-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 0;
+}
+
+.dyn-header-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.dyn-hw-note {
+  color: #5e7690;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 6.8px;
+  letter-spacing: 0.03em;
+}
+
+.dyn-icon-btn {
+  display: inline-flex;
+  height: 20px;
+  min-width: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(61, 96, 137, 0.5);
+  border-radius: 4px;
+  background: rgba(20, 30, 45, 0.8);
+  padding: 0 4px;
+  color: #8fa8c4;
+  font-size: 11px;
+  line-height: 1;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.dyn-icon-btn:hover {
+  border-color: rgba(111, 178, 255, 0.55);
+  color: #d6e7fa;
+}
+
+.dyn-icon-btn[data-active='true'] {
+  border-color: rgba(77, 157, 255, 0.6);
+  background: rgba(77, 157, 255, 0.16);
+  color: #bfe0ff;
+}
+
+.dyn-direction {
+  display: flex;
+  height: 24px;
+  flex: 0 0 24px;
+  align-items: center;
+  gap: 5px;
+  border-bottom: 1px solid rgba(40, 56, 78, 0.52);
+  background: rgba(9, 14, 22, 0.6);
+  padding: 0 10px;
+  color: #6b8099;
+  font-size: 7.3px;
+}
+
+.dyn-step-note {
+  margin-left: auto;
+  color: #8ba2bd;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
+/* 活动栈帧图例：即使帧框上沿滚出视野，也能看到函数名与范围 */
+.dyn-frames-strip {
+  display: flex;
+  height: 27px;
+  flex: 0 0 27px;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  border-bottom: 1px solid rgba(40, 56, 78, 0.52);
+  background: rgba(8, 13, 20, 0.66);
+  padding: 0 8px;
+}
+
+.dyn-frames-strip::-webkit-scrollbar {
+  height: 0;
+}
+
+.dyn-frames-chip {
+  display: inline-flex;
+  height: 19px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid color-mix(in srgb, var(--frame-color) 45%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--frame-color) 9%, rgba(10, 16, 25, 0.9));
+  padding: 0 5px;
+  color: #b9c9db;
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.dyn-frames-chip[data-current='true'] {
+  border-color: var(--frame-color);
+  color: #e3edf9;
+}
+
+.dyn-frames-chip[data-selected='true'] {
+  box-shadow: 0 0 0 1px var(--frame-color);
+}
+
+.dyn-frames-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--frame-color);
+}
+
+.dyn-frames-chip b {
+  color: var(--frame-color);
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 7.2px;
+  font-weight: 650;
+}
+
+.dyn-frames-range {
+  color: #7d93ad;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 6.4px;
+}
+
+.dyn-frames-chip em {
+  color: #5f7691;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 6.4px;
+  font-style: normal;
+}
+
+.dyn-frames-empty {
+  color: #5d738d;
+  font-size: 7.2px;
+}
+
+.dyn-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background:
+    radial-gradient(ellipse 58% 36% at 50% 0%, rgba(77, 157, 255, 0.08), transparent 64%),
+    #070c14;
+}
+
+.dyn-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2px 0 12px;
+}
+
+.dyn-cap {
+  display: flex;
+  width: calc(100% - 144px);
+  height: 17px;
+  flex: 0 0 17px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #4c6076;
+  font-size: 6.6px;
+  letter-spacing: 0.06em;
+}
+
+.dyn-cap b {
+  color: #5f7691;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.dyn-cap[data-edge='high'] {
+  align-items: flex-end;
+  padding-bottom: 2px;
+}
+
+.dyn-cap[data-edge='low'] {
+  align-items: flex-start;
+  padding-top: 2px;
+}
+
+/* 栈容器：一个连续的内存柱，格子之间没有间距 */
+.dyn-well {
+  position: relative;
+  box-sizing: border-box;
+  width: calc(100% - 144px);
+}
+
+.dyn-cells {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(64, 88, 118, 0.72);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(12, 19, 30, 0.97), rgba(7, 12, 20, 0.99));
+  box-shadow:
+    0 20px 44px -34px rgba(0, 0, 0, 0.95),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+/* 单个 4 字节内存单元 */
+.dyn-cell {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 4px 12px 4px 15px;
+  border-bottom: 1px solid rgba(38, 54, 76, 0.62);
+  cursor: pointer;
+  transition: background 140ms ease, box-shadow 140ms ease;
+}
+
+.dyn-cell:last-child {
+  border-bottom: 0;
+}
+
+.dyn-cell::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: var(--type-color, #556b84);
+  opacity: 0.7;
+  content: '';
+}
+
+.dyn-cell:hover {
+  background: rgba(40, 62, 90, 0.36);
+}
+
+.dyn-cell[data-state='free'] {
+  background: rgba(5, 9, 15, 0.4);
+}
+
+.dyn-cell[data-state='free']::before {
+  opacity: 0.18;
+}
+
+.dyn-cell[data-state='residual'] {
+  background: rgba(15, 22, 32, 0.42);
+}
+
+.dyn-cell[data-state='residual']::before {
+  background: #6d7f95;
+  opacity: 0.55;
+}
+
+.dyn-cell[data-fill='true'] {
+  background: linear-gradient(90deg, rgba(236, 140, 168, 0.12), rgba(236, 140, 168, 0.02) 70%, transparent);
+}
+
+.dyn-cell[data-focus='true'] {
+  background: rgba(244, 184, 96, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(244, 184, 96, 0.5);
+}
+
+.dyn-cell[data-esp='true'] {
+  box-shadow: inset 3px 0 0 rgba(77, 157, 255, 0.9);
+}
+
+.dyn-cell[data-ebp='true'] {
+  box-shadow: inset -3px 0 0 rgba(55, 217, 155, 0.9);
+}
+
+.dyn-cell[data-esp='true'][data-ebp='true'] {
+  box-shadow:
+    inset 3px 0 0 rgba(77, 157, 255, 0.9),
+    inset -3px 0 0 rgba(55, 217, 155, 0.9);
+}
+
+/* 新单元进入 / 旧单元退出 */
+.dyn-cell[data-entering='true'] {
+  animation: dyn-cell-in 420ms cubic-bezier(0.2, 0.85, 0.3, 1);
+}
+
+.dyn-cell[data-leaving='true'] {
+  animation: dyn-cell-out 440ms ease-out;
+}
+
+@keyframes dyn-cell-in {
+  0% {
+    transform: translateY(-26px);
+    opacity: 0.1;
+  }
+  62% {
+    transform: translateY(2px);
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes dyn-cell-out {
+  0% {
+    transform: none;
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-10px);
+    opacity: 0.45;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.dyn-cell-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dyn-cell-addr {
+  color: #5a7089;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 8.4px;
+  letter-spacing: -0.02em;
+}
+
+.dyn-cell[data-esp='true'] .dyn-cell-addr {
+  color: #8bc4ff;
+}
+
+.dyn-cell[data-ebp='true'] .dyn-cell-addr {
+  color: #7fe0bb;
+}
+
+.dyn-cell-value {
+  color: #e6f1fd;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 11.5px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+}
+
+.dyn-cell-value[data-fill='true'] {
+  color: #ff9dbb;
+}
+
+.dyn-cell-value i {
+  margin-right: 3px;
+  border: 1px solid rgba(236, 140, 168, 0.45);
+  border-radius: 2px;
+  padding: 0 2px;
+  color: #e58aa4;
+  font-size: 6px;
+  font-style: normal;
+  letter-spacing: 0.04em;
+}
+
+.dyn-cell[data-state='free'] .dyn-cell-value {
+  color: #3b4c61;
+}
+
+.dyn-cell-body {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.dyn-cell-label {
+  overflow: hidden;
+  color: #cbdcee;
+  font-size: 9.8px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dyn-cell[data-state='free'] .dyn-cell-label {
+  color: #45586e;
+}
+
+.dyn-cell[data-state='residual'] .dyn-cell-label {
+  color: #9aaabd;
+}
+
+.dyn-cell-state {
+  flex: 0 0 auto;
+  margin-left: auto;
+  border: 1px solid rgba(61, 96, 137, 0.4);
+  border-radius: 3px;
+  padding: 0 4px;
+  color: #8298b2;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 6.2px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.dyn-cell[data-state='valid'] .dyn-cell-state {
+  border-color: rgba(55, 217, 155, 0.34);
+  background: rgba(55, 217, 155, 0.08);
+  color: #7fe0bb;
+}
+
+.dyn-cell[data-state='reserved'] .dyn-cell-state {
+  border-color: rgba(236, 140, 168, 0.34);
+  background: rgba(236, 140, 168, 0.08);
+  color: #f1a6bc;
+}
+
+.dyn-cell[data-state='residual'] .dyn-cell-state {
+  border-color: rgba(142, 164, 191, 0.3);
+  color: #9fb1c7;
+}
+
+.dyn-cell[data-state='free'] .dyn-cell-state {
+  border-color: rgba(58, 76, 98, 0.5);
+  color: #4f6479;
+}
+
+.dyn-cell-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+  color: #5b7089;
+  font-size: 6.7px;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.dyn-cell-meta em {
+  color: #748ca8;
+  font-style: normal;
+}
+
+.dyn-cell-meta i {
+  color: #3c4f63;
+  font-style: normal;
+}
+
+.dyn-cell-meta code {
+  overflow: hidden;
+  color: #6b83a0;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 6.5px;
+  text-overflow: ellipsis;
+}
+
+.dyn-well[data-density='compact'] .dyn-cell {
+  padding: 2px 10px 2px 13px;
+}
+
+.dyn-well[data-density='compact'] .dyn-cell-addr {
+  font-size: 7.6px;
+}
+
+.dyn-well[data-density='compact'] .dyn-cell-value {
+  font-size: 10px;
+}
+
+.dyn-well[data-density='compact'] .dyn-cell-label {
+  font-size: 8.6px;
+}
+
+.dyn-well[data-density='compact'] .dyn-cell-meta {
+  font-size: 6.1px;
+}
+
+.dyn-well[data-density='compact'] .dyn-cell-state {
+  font-size: 5.8px;
+}
+
+.dyn-cell-flash {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(77, 157, 255, 0.34), transparent 74%);
+  pointer-events: none;
+}
+
+.dyn-cell-flash[data-kind='write'] {
+  background: linear-gradient(90deg, rgba(55, 217, 155, 0.34), transparent 74%);
+}
+
+.dyn-cell-flash[data-kind='fill'] {
+  background: linear-gradient(90deg, rgba(236, 140, 168, 0.32), transparent 74%);
+}
+
+.dyn-cell-flash[data-kind='pop'],
+.dyn-cell-flash[data-kind='ret'],
+.dyn-cell-flash[data-kind='release'] {
+  background: linear-gradient(90deg, rgba(244, 184, 96, 0.3), transparent 74%);
+}
+
+/* 帧框：严格包住属于该帧的连续格子 */
+.dyn-frame {
+  position: absolute;
+  z-index: 3;
+  right: -3px;
+  left: -3px;
+  border: 1.5px solid color-mix(in srgb, var(--frame-color) 62%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--frame-color) 5%, transparent);
+  pointer-events: none;
+}
+
+.dyn-frame[data-current='true'] {
+  border-width: 2px;
+  box-shadow: inset 0 0 30px -18px var(--frame-color);
+}
+
+.dyn-frame[data-selected='true'] {
+  box-shadow:
+    0 0 0 1px var(--frame-color),
+    inset 0 0 34px -16px var(--frame-color);
+}
+
+.dyn-frame[data-ghost='true'] {
+  border-style: dashed;
+  opacity: 0.3;
+}
+
+.dyn-frame-label {
+  position: absolute;
+  top: -12px;
+  left: 7px;
+  display: flex;
+  max-width: calc(100% - 14px);
+  align-items: center;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--frame-color) 42%, transparent);
+  border-radius: 5px;
+  background: #0b121c;
+  padding: 0 6px;
+  color: var(--frame-color);
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 6.9px;
+  font-weight: 650;
+  line-height: 1.65;
+  pointer-events: auto;
+  white-space: nowrap;
+  box-shadow: 0 6px 14px -10px rgba(0, 0, 0, 0.95);
+}
+
+.dyn-frame-label:hover {
+  background: #101a28;
+}
+
+.dyn-frame-label[data-ghost='true'] {
+  pointer-events: none;
+}
+
+.dyn-frame-label em {
+  color: #8a9db4;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.dyn-frame-range {
+  color: #869bb4;
+  font-size: 6.2px;
+  font-weight: 500;
+}
+
+/* ESP / EBP 指针：容器左右两侧，箭头指向格子中线 */
+.dyn-lane {
+  position: absolute;
+  z-index: 6;
+  top: 0;
+  bottom: 0;
+  width: 64px;
+  pointer-events: none;
+}
+
+.dyn-lane-left {
+  left: -72px;
+}
+
+.dyn-lane-right {
+  right: -72px;
+}
+
+.dyn-pointer {
+  position: absolute;
+  left: 0;
+  display: flex;
+  width: 64px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid color-mix(in srgb, var(--ptr-color) 62%, transparent);
+  border-radius: 6px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ptr-color) 20%, #0e1724),
+    rgba(9, 16, 26, 0.97)
+  );
+  padding: 0 4px;
+  box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.95);
+  pointer-events: auto;
+}
+
+.dyn-pointer:hover {
+  border-color: var(--ptr-color);
+}
+
+.dyn-pointer-name {
+  color: var(--ptr-color);
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 6.8px;
+  font-weight: 740;
+  letter-spacing: 0.04em;
+}
+
+.dyn-pointer-value {
+  color: #e6f0fb;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 7.9px;
+  font-weight: 560;
+  letter-spacing: -0.03em;
+}
+
+.dyn-pointer-arrow {
+  position: absolute;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform: translateY(-50%);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+
+.dyn-pointer[data-side='esp'] .dyn-pointer-arrow {
+  right: -8px;
+  border-left: 7px solid var(--ptr-color);
+  filter: drop-shadow(0 0 3px var(--ptr-color));
+}
+
+.dyn-pointer[data-side='ebp'] .dyn-pointer-arrow {
+  left: -8px;
+  border-right: 7px solid var(--ptr-color);
+  filter: drop-shadow(0 0 3px var(--ptr-color));
+}
+
+/* EBP 指向当前模拟栈区间之外（调用者帧基准）：只显示地址，不画误导性箭头 */
+.dyn-pointer-outside {
+  top: 4px;
+  gap: 3px;
+  border-style: dashed;
+  border-color: rgba(142, 164, 191, 0.45);
+  background: rgba(10, 16, 26, 0.9);
+}
+
+.dyn-pointer-outside .dyn-pointer-name,
+.dyn-pointer-outside .dyn-pointer-value {
+  color: #9fb1c7;
+}
+
+.dyn-pointer-outside-tag {
+  border: 1px solid rgba(142, 164, 191, 0.35);
+  border-radius: 2px;
+  padding: 0 2px;
+  color: #8ea4bf;
+  font-size: 5.8px;
+  letter-spacing: 0.03em;
+}
+
+.dyn-token {
+  position: absolute;
+  z-index: 7;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(77, 157, 255, 0.5);
+  border-radius: 4px;
+  background: rgba(13, 26, 43, 0.97);
+  padding: 2px 7px;
+  color: #bcd8f8;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 7.2px;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 8px 22px -12px rgba(0, 0, 0, 0.95);
+}
+
+.dyn-token[data-kind='pop'],
+.dyn-token[data-kind='ret'] {
+  border-color: rgba(244, 184, 96, 0.5);
+  color: #f4d19a;
+}
+.dyn-status {
+  display: flex;
+  height: 26px;
+  flex: 0 0 26px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid rgba(40, 56, 78, 0.52);
+  background: rgba(9, 14, 22, 0.66);
+  padding: 0 10px;
+  color: #7389a2;
+  font-size: 7.5px;
+}
+
+.dyn-status-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.dyn-status-main b {
+  color: #cfe0f2;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-weight: 600;
+}
+
+.dyn-status-value {
+  color: #9fdcff;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
+.dyn-status-main i {
+  color: #46596e;
+  font-style: normal;
+}
+
+.dyn-status-hint {
+  color: #5d738d;
+}
+
+.dyn-status-frames {
+  flex: 0 0 auto;
+  color: #5d738d;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
+/* 汇编行可点击查看解释 */
+.code-line {
+  cursor: pointer;
+}
+
+/* 指令面板 · 本步访问的内存 */
+.diff-memory {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px dashed rgba(52, 72, 98, 0.6);
+  margin-top: 4px;
+  padding-top: 4px;
+  font-size: 8px;
+}
+
+.diff-memory-label {
+  color: #6f8098;
+  font-size: 7.4px;
+  letter-spacing: 0.05em;
+}
+
+.diff-memory-value {
+  color: #cfe0f2;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 8px;
+  font-weight: 550;
+}
+
+.diff-memory-note {
+  margin-left: auto;
+  overflow: hidden;
+  color: #5f7691;
+  font-size: 7.2px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 指令面板的寄存器 diff 卡：多出“内存”行后需要收紧，避免在 230px 内溢出 */
+.dock-instruction .diff-card {
+  overflow: hidden;
+  padding: 5px 9px 4px;
+}
+
+.dock-instruction .diff-row {
+  flex: 0 0 auto;
+  min-height: 17px;
+  padding: 1px 0;
+}
+
+.dock-instruction .diff-source {
+  display: none;
+}
+
+.dock-instruction .diff-eip {
+  margin-top: 3px;
+  padding-top: 3px;
+}
+
+.dock-instruction .diff-memory {
+  margin-top: 2px;
+  padding-top: 2px;
+}
+
+.code-line[data-inspected='true'] {
+  background: rgba(244, 184, 96, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(244, 184, 96, 0.38);
+}
+
+.dock-inspecting {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(244, 184, 96, 0.42);
+  border-radius: 4px;
+  background: rgba(244, 184, 96, 0.1);
+  padding: 1px 6px;
+  color: #f0c77e;
+  font-size: 7.4px;
+  letter-spacing: 0.03em;
+  transition: background 140ms ease;
+}
+
+.dock-inspecting:hover {
+  background: rgba(244, 184, 96, 0.2);
+}
+
+@media (max-height: 820px) {
+  .dyn-right .c-source-panel {
+    flex-basis: 180px;
+  }
+
+  .dyn-right .code-panel {
+    flex-basis: 152px;
+  }
+
+  .dyn-right .instruction-panel {
+    flex-basis: 204px;
+  }
+
+  .dynamic-registers {
+    height: 66px;
+    flex-basis: 66px;
+  }
+
+  .dyn-hw-note {
+    display: none;
+  }
+}
+
+@media (max-height: 740px) {
+  .dyn-right .instruction-panel {
+    flex-basis: 190px;
+  }
+
+  .dyn-right .diff-head {
+    display: none;
+  }
+
+  .dynamic-registers {
+    height: 62px;
+    flex-basis: 62px;
+  }
 }

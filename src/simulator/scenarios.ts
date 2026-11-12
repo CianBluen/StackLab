@@ -89,21 +89,74 @@ const createEstablishedMain = ({
         type: 'return',
         label: 'main 返回地址',
         frameId: frame.id,
+        sourceInstruction: 'call main（案例起点之前）',
       },
       {
         address: 0x1000,
         value: CALLER_EBP,
         type: 'saved-ebp',
-        label: '保存的 EBP',
+        label: 'main 保存的旧 EBP',
         frameId: frame.id,
+        sourceInstruction: 'push ebp（案例起点之前）',
       },
       ...extraCells,
     ],
   })
 }
 
-const teachingProfile = (note: string) => ({
-  kind: 'teaching' as const,
+/**
+ * 「main 刚被运行时 CALL 进来」的起点：栈顶只有返回地址，序言还没执行。
+ * 用于只想讲 main 自己的栈帧与局部变量、又不想重跑整条启动链的案例。
+ */
+const createMainAtEntry = ({
+  eip,
+  signature = 'main()',
+  stackTop = STACK_TOP,
+  stackBottom = STACK_BOTTOM,
+  registers = defaultRegisters,
+}: {
+  eip: number
+  signature?: string
+  stackTop?: number
+  stackBottom?: number
+  registers?: Partial<Record<keyof SimulatorState['registers'], number>>
+}): SimulatorState => {
+  const frame = setupFrame({
+    id: 'main@entry',
+    functionId: 'main',
+    name: 'main',
+    signature,
+    tone: 'blue',
+    entryESP: 0x1000,
+    currentESP: 0x1000,
+    entryEBP: CALLER_EBP,
+    returnAddress: MAIN_RETURN,
+    returnTo: '运行时启动代码',
+    status: 'creating',
+  })
+
+  return createInitialState({
+    stackTop,
+    stackBottom,
+    esp: 0x1000,
+    ebp: CALLER_EBP,
+    eip,
+    registers,
+    frames: [frame],
+    cells: [
+      {
+        address: 0x1000,
+        value: MAIN_RETURN,
+        type: 'return',
+        label: 'main 返回地址',
+        frameId: frame.id,
+        sourceInstruction: 'call main（案例起点之前）',
+      },
+    ],
+  })
+}
+
+const teachingProfile = (note: string) => ({  kind: 'teaching' as const,
   compiler: '手写教学汇编',
   options: '非编译器实时输出',
   abi: 'x86-32 · cdecl',
@@ -668,6 +721,50 @@ const calleeSavedScenario = (): Scenario => {
 // ---------------------------------------------------------------------------
 
 const startupScenario = (): Scenario => {
+  const loaderSpec: FunctionSpec = {
+    id: 'kernel',
+    name: '内核 (OS)',
+    signature: 'loader',
+    tone: 'slate',
+    baseAddress: 0x08048ff0,
+    sourceFunctionId: null,
+    isSystem: true,
+    steps: [
+      {
+        id: 'loader-init-stack',
+        phase: 'A',
+        op: {
+          type: 'os-init-stack',
+          label: '内核：映射 ELF 并建立初始用户栈',
+          writes: [
+            { address: 0x2000, value: 1, type: 'argc', label: 'argc = 1' },
+            {
+              address: 0x2004,
+              value: 0x00402000,
+              type: 'argv',
+              label: 'argv[0] → 程序路径',
+            },
+            { address: 0x2008, value: 0, type: 'argv', label: 'argv[1] = NULL' },
+            {
+              address: 0x200c,
+              value: 0x00402020,
+              type: 'envp',
+              label: 'envp[0] → PATH=…',
+            },
+            { address: 0x2010, value: 0, type: 'envp', label: 'envp[1] = NULL' },
+            { address: 0x2014, value: 4096, type: 'auxv', label: 'AT_PAGESZ = 4096' },
+          ],
+        },
+        assembly: 'kernel: setup_initial_stack',
+        title: '操作系统建立初始用户栈',
+        explanation:
+          '这一步不是 CPU 执行的 x86 指令，而是内核/装载器在程序开始运行前完成的工作：为新进程映射内存映像，把 argc、argv 指针数组、环境变量指针和辅助向量（auxv）写入用户栈。',
+        reason:
+          '执行后 ESP = {espA}，栈顶是 argc。注意：此时还没有任何 C 函数栈帧，main 的返回地址也还不存在；这些单元属于“进程初始栈”，不是 main 的局部变量。',
+      },
+    ],
+  }
+
   const startSpec: FunctionSpec = {
     id: '_start',
     name: '_start',
@@ -929,10 +1026,10 @@ const startupScenario = (): Scenario => {
         phase: 'C',
         op: {
           type: 'sub-esp',
-          bytes: 8,
+          bytes: 12,
           purpose: 'locals',
-          label: 'a / b 局部变量槽',
-          effectLabel: '为 a / b 预留 8 B',
+          label: 'a / b / c 局部变量槽',
+          effectLabel: '为 a / b / c 预留 12 B',
         },
       },
       {
@@ -959,14 +1056,27 @@ const startupScenario = (): Scenario => {
         phase: 'C',
         op: { type: 'add-reg-mem', register: 'eax', base: 'ebp', offset: -8, variable: 'b' },
       },
-      { id: 'startup-main-release', cLine: 6, phase: 'C', op: { type: 'mov-esp-ebp' } },
-      { id: 'startup-main-pop-ebp', cLine: 6, phase: 'C', op: { type: 'pop-ebp' } },
-      { id: 'startup-main-ret', cLine: 6, phase: 'C', op: { type: 'ret' } },
+      {
+        id: 'startup-main-store-c',
+        cLine: 5,
+        phase: 'C',
+        op: { type: 'mov-mem-reg', offset: -12, register: 'eax', variable: 'c' },
+      },
+      {
+        id: 'startup-main-eax-c',
+        cLine: 6,
+        phase: 'C',
+        op: { type: 'mov-reg-mem', register: 'eax', base: 'ebp', offset: -12, variable: 'c' },
+      },
+      { id: 'startup-main-release', cLine: 7, phase: 'C', op: { type: 'mov-esp-ebp' } },
+      { id: 'startup-main-pop-ebp', cLine: 7, phase: 'C', op: { type: 'pop-ebp' } },
+      { id: 'startup-main-ret', cLine: 7, phase: 'C', op: { type: 'ret' } },
     ],
   }
 
-  const program = buildProgram([startSpec, libcSpec, mainSpec])
+  const program = buildProgram([loaderSpec, startSpec, libcSpec, mainSpec])
   const execution = selectExecutionOrder(program, [
+    'loader-init-stack',
     'start-xor-ebp',
     'start-mov-edi',
     'start-push-argv',
@@ -986,6 +1096,8 @@ const startupScenario = (): Scenario => {
     'startup-main-b',
     'startup-main-eax-a',
     'startup-main-add-b',
+    'startup-main-store-c',
+    'startup-main-eax-c',
     'startup-main-release',
     'startup-main-pop-ebp',
     'startup-main-ret',
@@ -1002,40 +1114,45 @@ const startupScenario = (): Scenario => {
   const startupTop = 0x2020
   const startupBottom = 0x1f40
 
-  const phases: ScenarioPhase[] = [
+  const phaseMeta = [
     {
       id: 'A',
       label: 'A · 加载程序',
-      description: '内核建立初始栈：argc、argv、envp 已就绪，main 尚未执行。',
       color: '#8ea4bf',
-      fromStep: 0,
-      toStep: 0,
+      description:
+        '内核映射 ELF 内存映像，建立初始用户栈（argc、argv、envp、auxv），并设置程序入口地址。此时 main 还没有被调用。',
     },
     {
       id: 'B',
       label: 'B · 进入 _start',
-      description: '从 ELF 入口 _start 开始，准备运行时参数并调用 __libc_start_main。',
       color: '#b28cff',
-      fromStep: 1,
-      toStep: 6,
+      description: '从 ELF 入口 _start 开始，准备运行时参数并调用 __libc_start_main。',
     },
     {
       id: 'C',
       label: 'C · 运行时调用 main',
-      description: '运行时压入 main 的参数，CALL main，main 建立自己的 EBP 栈帧。',
       color: '#4d9dff',
-      fromStep: 7,
-      toStep: 22,
+      description: '运行时压入 main 的参数，CALL main，main 建立自己的 EBP 栈帧并运行。',
     },
     {
       id: 'D',
       label: 'D · 返回与退出',
-      description: 'main 返回运行时，运行时返回 _start，最终通过 int 0x80 退出。',
       color: '#37d99b',
-      fromStep: 23,
-      toStep: 30,
+      description: 'main 返回运行时，运行时返回 _start，最终通过 int 0x80 退出。',
     },
   ]
+
+  // 阶段边界由指令上的 phase 标记推导，避免增删指令后手写 fromStep/toStep 失配。
+  const phases: ScenarioPhase[] = phaseMeta.map((entry) => {
+    const steps = execution
+      .map((instruction, index) => (instruction.phase === entry.id ? index + 1 : 0))
+      .filter((step) => step > 0)
+    return {
+      ...entry,
+      fromStep: entry.id === 'A' ? 0 : (steps[0] ?? 1),
+      toStep: steps[steps.length - 1] ?? 1,
+    }
+  })
 
   return {
     id: 'startup',
@@ -1061,7 +1178,8 @@ const startupScenario = (): Scenario => {
         '{',
         '    int a = 10;',
         '    int b = 20;',
-        '    return a + b;',
+        '    int c = a + b;',
+        '    return c;',
         '}',
       ].join('\n'),
       [
@@ -1070,7 +1188,7 @@ const startupScenario = (): Scenario => {
           name: 'main',
           signature: 'int main(int argc, char **argv)',
           startLine: 1,
-          endLine: 6,
+          endLine: 7,
         },
       ],
     ),
@@ -1086,6 +1204,7 @@ const startupScenario = (): Scenario => {
       },
       { name: 'a', functionId: 'main', line: 3, typeLabel: 'int', storage: 'stack', offset: -4 },
       { name: 'b', functionId: 'main', line: 4, typeLabel: 'int', storage: 'stack', offset: -8 },
+      { name: 'c', functionId: 'main', line: 5, typeLabel: 'int', storage: 'stack', offset: -12 },
     ],
     codeGroups: program.codeGroups,
     instructions: execution,
@@ -1096,8 +1215,8 @@ const startupScenario = (): Scenario => {
       const kernel = setupFrame({
         id: 'kernel@initial',
         functionId: 'kernel',
-        name: 'kernel',
-        signature: '初始栈',
+        name: '初始进程栈',
+        signature: '内核写入的进程初始栈',
         tone: 'slate',
         entryESP: 0x2000,
         currentESP: 0x2000,
@@ -1123,50 +1242,8 @@ const startupScenario = (): Scenario => {
         ebp: 0,
         eip: execution[0].address,
         frames: [kernel, start],
-        cells: [
-          {
-            address: 0x2000,
-            value: 1,
-            type: 'argc',
-            label: 'argc = 1',
-            frameId: kernel.id,
-          },
-          {
-            address: 0x2004,
-            value: 0x00402000,
-            type: 'argv',
-            label: 'argv[0] → 程序路径',
-            frameId: kernel.id,
-          },
-          {
-            address: 0x2008,
-            value: 0,
-            type: 'argv',
-            label: 'argv[1] = NULL',
-            frameId: kernel.id,
-          },
-          {
-            address: 0x200c,
-            value: 0x00402020,
-            type: 'envp',
-            label: 'envp[0] → PATH=…',
-            frameId: kernel.id,
-          },
-          {
-            address: 0x2010,
-            value: 0,
-            type: 'envp',
-            label: 'envp[1] = NULL',
-            frameId: kernel.id,
-          },
-          {
-            address: 0x2014,
-            value: 4096,
-            type: 'auxv',
-            label: 'AT_PAGESZ = 4096',
-            frameId: kernel.id,
-          },
-        ],
+        // 初始用户栈此时还是空的：argc/argv/envp/auxv 由第 1 步“内核建立初始栈”写入。
+        cells: [],
       })
     },
     resultLabel: 'main() 返回值',
@@ -1628,6 +1705,7 @@ const optimizedScenario = (): Scenario => {
             type: 'return',
             label: 'main 返回地址',
             frameId: frame.id,
+            sourceInstruction: 'call main（案例起点之前）',
           },
         ],
       })
@@ -1637,12 +1715,408 @@ const optimizedScenario = (): Scenario => {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 案例 7：main 自己的局部变量（从 main 入口开始）
+// ---------------------------------------------------------------------------
+
+const mainLocalsScenario = (): Scenario => {
+  const mainSpec: FunctionSpec = {
+    id: 'main',
+    name: 'main',
+    signature: 'main()',
+    tone: 'blue',
+    baseAddress: 0x00401000,
+    sourceFunctionId: 'main',
+    steps: [
+      {
+        id: 'mloc-push-ebp',
+        cLine: 2,
+        op: { type: 'push-ebp' },
+        title: 'main 保存调用者的旧 EBP',
+        explanation:
+          'main 开始建立自己的栈帧。它先把调用者（运行时）当前的 EBP 压栈保存，返回时再恢复，避免破坏调用者的栈帧基准。',
+        reason:
+          'push 先把 ESP 减 4，再把 EBP = {ebpB} 写入新的栈顶 {espA}。这块单元被标记为“main 保存的旧 EBP”，它和返回地址是两个不同的单元。',
+      },
+      {
+        id: 'mloc-mov-ebp',
+        cLine: 2,
+        op: { type: 'mov-ebp-esp' },
+        title: 'main 建立自己的栈帧基准',
+        explanation:
+          'mov ebp, esp 把当前栈顶复制给 EBP。此后 EBP 固定不动，局部变量通过 [ebp−4]、[ebp−8] 访问。',
+        reason:
+          'EBP 从 {ebpB} 变为 {ebpA}，与 ESP = {espA} 重合。ESP 不变。旧 EBP 仍保存在 [ebp]，返回地址在 [ebp+4]。',
+      },
+      {
+        id: 'mloc-sub',
+        cLine: 2,
+        op: {
+          type: 'sub-esp',
+          bytes: 12,
+          purpose: 'locals',
+          label: 'a / b / c 局部变量槽',
+          effectLabel: '为 a / b / c 预留 12 B',
+        },
+        title: '为三个 int 预留 12 字节',
+        explanation:
+          'sub esp, 12 只是把栈顶向低地址移动 12 字节，CPU 不会初始化这块空间。变量还没有值。',
+        reason:
+          'ESP 从 {espB} 变为 {espA}，EBP 保持 {ebpA}。三个 4 字节槽位分别是 [ebp−4]、[ebp−8]、[ebp−12]，现在处于“已预留、未初始化”状态。',
+      },
+      {
+        id: 'mloc-a',
+        cLine: 3,
+        op: { type: 'mov-mem-imm', offset: -4, value: 10, variable: 'a' },
+        title: '把 10 写入 [ebp−4]，a 诞生',
+        explanation:
+          '这是第一条真正写局部变量的指令。mov 把十进制 10 转成 0x0000000A，写入 EBP−4 指向的栈单元。',
+        reason:
+          '目标地址 = EBP {ebpA} + (−4) = {espA} 上方第 1 个槽位。写入后 a 从“未初始化”变成“已初始化”，ESP 与 EBP 都不变。',
+      },
+      {
+        id: 'mloc-b',
+        cLine: 4,
+        op: { type: 'mov-mem-imm', offset: -8, value: 20, variable: 'b' },
+        title: '把 20 写入 [ebp−8]，b 诞生',
+        explanation: '第二条 mov 写入第二个局部变量槽。',
+        reason:
+          '目标地址 = EBP {ebpA} + (−8)。b 从调试填充/未初始化变成 20；未初始化的槽位会明显减少。',
+      },
+      {
+        id: 'mloc-eax-a',
+        cLine: 5,
+        op: { type: 'mov-reg-mem', register: 'eax', base: 'ebp', offset: -4, variable: 'a' },
+      },
+      {
+        id: 'mloc-add-b',
+        cLine: 5,
+        op: { type: 'add-reg-mem', register: 'eax', base: 'ebp', offset: -8, variable: 'b' },
+      },
+      {
+        id: 'mloc-store-c',
+        cLine: 5,
+        op: { type: 'mov-mem-reg', offset: -12, register: 'eax', variable: 'c' },
+        title: '把 EAX 写入 [ebp−12]，c 得到结果',
+        explanation:
+          'a + b 的结果先存在于 EAX，随后被写回第三个栈槽，成为变量 c。局部变量是靠内存写入产生的，不是被 CALL 出来的。',
+        reason:
+          '目标地址 = EBP {ebpA} + (−12) = {espA}（栈顶槽）。写入后 c 初始化完成，EAX 暂存值与 c 内容相同。',
+      },
+      {
+        id: 'mloc-eax-c',
+        cLine: 6,
+        op: { type: 'mov-reg-mem', register: 'eax', base: 'ebp', offset: -12, variable: 'c' },
+      },
+      { id: 'mloc-release', cLine: 7, op: { type: 'mov-esp-ebp' } },
+      { id: 'mloc-pop-ebp', cLine: 7, op: { type: 'pop-ebp' } },
+      { id: 'mloc-ret', cLine: 7, op: { type: 'ret' } },
+    ],
+  }
+
+  const program = buildProgram([mainSpec])
+  const execution = selectExecutionOrder(program, [
+    'mloc-push-ebp',
+    'mloc-mov-ebp',
+    'mloc-sub',
+    'mloc-a',
+    'mloc-b',
+    'mloc-eax-a',
+    'mloc-add-b',
+    'mloc-store-c',
+    'mloc-eax-c',
+    'mloc-release',
+    'mloc-pop-ebp',
+    'mloc-ret',
+  ])
+
+  return {
+    id: 'main-locals',
+    title: 'main 的局部变量',
+    shortTitle: 'main 局部变量',
+    subtitle: 'SUB ESP 12 · [EBP−4/−8/−12]',
+    description:
+      '从 main 刚被 CALL 进来的那一刻开始：只有返回地址在栈上，逐条执行 push ebp / mov ebp, esp / sub esp, 12，再用 mov 给 a、b、c 赋值。',
+    level: '入门',
+    tags: ['SUB ESP', 'EBP 相对寻址', '局部变量', 'Debug Fill'],
+    learningPoints: [
+      'CALL 只压入返回地址，不创建完整栈帧',
+      'push ebp 保存旧 EBP，mov ebp, esp 固定帧基准',
+      'sub esp 只预留空间，mov 才真正产生变量',
+      '[ebp−4] 的有效地址 = EBP + (−4)',
+    ],
+    compiler: teachingProfile(
+      '手写教学汇编，逐条展开 EBP 帧建立与 [ebp−n] 寻址；不是 GCC 的实时输出。真实 GCC -O0 的序言会包含对齐与安全检查指令。',
+    ),
+    cSource: makeSource(
+      [
+        'int main()',
+        '{',
+        '    int a = 10;',
+        '    int b = 20;',
+        '    int c = a + b;',
+        '    return c;',
+        '}',
+      ].join('\n'),
+      [{ id: 'main', name: 'main', signature: 'int main()', startLine: 1, endLine: 7 }],
+    ),
+    variables: [
+      { name: 'a', functionId: 'main', line: 3, typeLabel: 'int', storage: 'stack', offset: -4 },
+      { name: 'b', functionId: 'main', line: 4, typeLabel: 'int', storage: 'stack', offset: -8 },
+      { name: 'c', functionId: 'main', line: 5, typeLabel: 'int', storage: 'stack', offset: -12 },
+    ],
+    codeGroups: program.codeGroups,
+    instructions: execution,
+    stackTop: STACK_TOP,
+    stackBottom: STACK_BOTTOM,
+    initialState: () => createMainAtEntry({ eip: execution[0].address }),
+    resultLabel: 'main() 返回值',
+    endEip: execution[execution.length - 1].address + 4,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 案例 8：main 调用 add（两个栈帧 + cdecl 参数 + 返回值）
+// ---------------------------------------------------------------------------
+
+const mainAddScenario = (): Scenario => {
+  const mainSpec: FunctionSpec = {
+    id: 'main',
+    name: 'main',
+    signature: 'main()',
+    tone: 'blue',
+    baseAddress: 0x00401000,
+    sourceFunctionId: 'main',
+    steps: [
+      { id: 'madd-push-ebp', cLine: 9, op: { type: 'push-ebp' } },
+      { id: 'madd-mov-ebp', cLine: 9, op: { type: 'mov-ebp-esp' } },
+      {
+        id: 'madd-sub',
+        cLine: 9,
+        op: {
+          type: 'sub-esp',
+          bytes: 12,
+          purpose: 'locals',
+          label: 'x / y / sum 局部变量槽',
+          effectLabel: '为 x / y / sum 预留 12 B',
+        },
+      },
+      {
+        id: 'madd-x',
+        cLine: 10,
+        op: { type: 'mov-mem-imm', offset: -4, value: 10, variable: 'x' },
+      },
+      {
+        id: 'madd-y',
+        cLine: 11,
+        op: { type: 'mov-mem-imm', offset: -8, value: 20, variable: 'y' },
+      },
+      {
+        id: 'madd-push-y',
+        cLine: 12,
+        op: { type: 'push-mem', base: 'ebp', offset: -8, label: '参数 b（y）' },
+        title: '按 cdecl 先压入第二个参数 y',
+        explanation:
+          'cdecl 的参数从右向左入栈：先压 b，再压 a。这样第一个参数总是离返回地址更近。',
+        reason:
+          '指令读取 [EBP−8] 中的 20，再执行 push。ESP 从 {espB} 变为 {espA}。这块单元暂时属于调用者的参数区，CALL 之后会转交给 add 的栈帧。',
+      },
+      {
+        id: 'madd-push-x',
+        cLine: 12,
+        op: { type: 'push-mem', base: 'ebp', offset: -4, label: '参数 a（x）' },
+        title: '压入第一个参数 x',
+        explanation: '参数 a 最后入栈，因此它在被调用者眼中位于 [ebp+8]。',
+        reason:
+          '读取 [EBP−4] 中的 10 并压栈，ESP 变为 {espA}。此时 add 的两个参数都在栈上，x、y 自己的局部变量槽没有变化。',
+      },
+      {
+        id: 'madd-call',
+        cLine: 12,
+        op: { type: 'call', targetFunctionId: 'add', argsBytes: 8 },
+      },
+      {
+        id: 'madd-cleanup',
+        cLine: 12,
+        op: { type: 'add-esp', bytes: 8, label: '调用者清理两个参数' },
+      },
+      {
+        id: 'madd-store-sum',
+        cLine: 12,
+        op: { type: 'mov-mem-reg', offset: -12, register: 'eax', variable: 'sum' },
+        title: '把 add 的返回值 EAX 写入 sum',
+        explanation:
+          'add 通过 EAX 返回结果。main 把 EAX 写入自己的第三个局部变量槽，得到变量 sum。',
+        reason:
+          '目标地址 = EBP {ebpA} + (−12)。这一步把“被调用者的返回值”变成“调用者的局部变量”，ESP 与 EBP 不变。',
+      },
+      {
+        id: 'madd-eax-sum',
+        cLine: 13,
+        op: { type: 'mov-reg-mem', register: 'eax', base: 'ebp', offset: -12, variable: 'sum' },
+      },
+      { id: 'madd-release', cLine: 14, op: { type: 'mov-esp-ebp' } },
+      { id: 'madd-pop-ebp', cLine: 14, op: { type: 'pop-ebp' } },
+      { id: 'madd-ret', cLine: 14, op: { type: 'ret' } },
+    ],
+  }
+
+  const addSpec: FunctionSpec = {
+    id: 'add',
+    name: 'add',
+    signature: 'add(a, b)',
+    tone: 'green',
+    baseAddress: 0x00401040,
+    sourceFunctionId: 'add',
+    steps: [
+      { id: 'madd-add-push-ebp', cLine: 2, op: { type: 'push-ebp' } },
+      { id: 'madd-add-mov-ebp', cLine: 2, op: { type: 'mov-ebp-esp' } },
+      {
+        id: 'madd-add-sub',
+        cLine: 2,
+        op: {
+          type: 'sub-esp',
+          bytes: 4,
+          purpose: 'locals',
+          label: 'result 局部变量槽',
+          effectLabel: '为 result 预留 4 B',
+        },
+      },
+      {
+        id: 'madd-add-eax-a',
+        cLine: 3,
+        op: { type: 'mov-reg-mem', register: 'eax', base: 'ebp', offset: 8, variable: 'a' },
+      },
+      {
+        id: 'madd-add-b',
+        cLine: 3,
+        op: { type: 'add-reg-mem', register: 'eax', base: 'ebp', offset: 12, variable: 'b' },
+      },
+      {
+        id: 'madd-add-result',
+        cLine: 3,
+        op: { type: 'mov-mem-reg', offset: -4, register: 'eax', variable: 'result' },
+      },
+      {
+        id: 'madd-add-eax-result',
+        cLine: 4,
+        op: { type: 'mov-reg-mem', register: 'eax', base: 'ebp', offset: -4, variable: 'result' },
+      },
+      { id: 'madd-add-release', cLine: 5, op: { type: 'mov-esp-ebp' } },
+      { id: 'madd-add-pop-ebp', cLine: 5, op: { type: 'pop-ebp' } },
+      { id: 'madd-add-ret', cLine: 5, op: { type: 'ret' } },
+    ],
+  }
+
+  const program = buildProgram([mainSpec, addSpec])
+  const execution = selectExecutionOrder(program, [
+    'madd-push-ebp',
+    'madd-mov-ebp',
+    'madd-sub',
+    'madd-x',
+    'madd-y',
+    'madd-push-y',
+    'madd-push-x',
+    'madd-call',
+    'madd-add-push-ebp',
+    'madd-add-mov-ebp',
+    'madd-add-sub',
+    'madd-add-eax-a',
+    'madd-add-b',
+    'madd-add-result',
+    'madd-add-eax-result',
+    'madd-add-release',
+    'madd-add-pop-ebp',
+    'madd-add-ret',
+    'madd-cleanup',
+    'madd-store-sum',
+    'madd-eax-sum',
+    'madd-release',
+    'madd-pop-ebp',
+    'madd-ret',
+  ])
+
+  return {
+    id: 'main-add',
+    title: 'main 调用 add：两个栈帧',
+    shortTitle: 'main → add',
+    subtitle: 'cdecl 参数 · 嵌套栈帧 · EAX 返回值',
+    description:
+      'main 先建立自己的栈帧和 x、y、sum 三个局部变量，再按 cdecl 从右向左压入参数、CALL add。add 建立独立栈帧，返回后栈帧释放，返回值经 EAX 写回 sum。',
+    level: '进阶',
+    tags: ['cdecl', 'CALL', '参数传递', '嵌套栈帧', 'RET'],
+    learningPoints: [
+      '参数由调用者压栈，CALL 再压入返回地址',
+      'add 的 [ebp+8]、[ebp+12] 正是 main 压入的两个参数',
+      '被调用者的局部变量在它自己的栈帧里',
+      '返回值通过 EAX 传回，不占栈',
+      'RET 之后 add 的栈帧释放，但旧值仍残留',
+    ],
+    compiler: teachingProfile(
+      '手写教学汇编，完整展示 cdecl 参数、两个栈帧与返回值路径；不是 GCC 的实时输出。真实 GCC -O0 可能在序言中额外做栈对齐。',
+    ),
+    cSource: makeSource(
+      [
+        'int add(int a, int b)',
+        '{',
+        '    int result = a + b;',
+        '    return result;',
+        '}',
+        '',
+        'int main()',
+        '{',
+        '    int x = 10;',
+        '    int y = 20;',
+        '    int sum = add(x, y);',
+        '    return sum;',
+        '}',
+      ].join('\n'),
+      [
+        { id: 'add', name: 'add', signature: 'int add(int a, int b)', startLine: 1, endLine: 5 },
+        { id: 'main', name: 'main', signature: 'int main()', startLine: 7, endLine: 13 },
+      ],
+    ),
+    variables: [
+      { name: 'x', functionId: 'main', line: 9, typeLabel: 'int', storage: 'stack', offset: -4 },
+      { name: 'y', functionId: 'main', line: 10, typeLabel: 'int', storage: 'stack', offset: -8 },
+      {
+        name: 'sum',
+        functionId: 'main',
+        line: 11,
+        typeLabel: 'int',
+        storage: 'stack',
+        offset: -12,
+      },
+      { name: 'a', functionId: 'add', line: 1, typeLabel: 'int', storage: 'stack', offset: 8 },
+      { name: 'b', functionId: 'add', line: 1, typeLabel: 'int', storage: 'stack', offset: 12 },
+      {
+        name: 'result',
+        functionId: 'add',
+        line: 3,
+        typeLabel: 'int',
+        storage: 'stack',
+        offset: -4,
+      },
+    ],
+    codeGroups: program.codeGroups,
+    instructions: execution,
+    stackTop: STACK_TOP,
+    stackBottom: STACK_BOTTOM,
+    initialState: () => createMainAtEntry({ eip: execution[0].address, signature: 'main()' }),
+    resultLabel: 'main() 返回值',
+    endEip: execution[execution.length - 1].address + 4,
+  }
+}
+
 export const SCENARIOS: Scenario[] = [
-  basicCallScenario(),
-  localVariablesScenario(),
-  calleeSavedScenario(),
+  // 默认入口：从操作系统建立初始栈开始，而不是一上来就出现 main 栈帧。
   startupScenario(),
+  mainLocalsScenario(),
+  basicCallScenario(),
+  mainAddScenario(),
+  calleeSavedScenario(),
   nestedScenario(),
+  localVariablesScenario(),
   optimizedScenario(),
 ]
 

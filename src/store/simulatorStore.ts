@@ -19,10 +19,13 @@ interface FocusTarget {
   label: string
 }
 
+export type WorkspaceLayout = 'dynamic' | 'learn'
+
 interface SimulatorStore {
   scenarioId: string
   scenario: Scenario
   debugFill: boolean
+  layout: WorkspaceLayout
   timeline: TimelineEntry[]
   currentStep: number
   totalSteps: number
@@ -32,9 +35,13 @@ interface SimulatorStore {
   focusAddress: number | null
   focusRegister: RegisterName | null
   focusLabel: string | null
+  /** 在汇编面板里点击某条指令时，临时查看它的解释，不改变当前执行步。 */
+  inspectedInstructionId: string | null
+  inspectedAtStep: number | null
   scenarios: Scenario[]
   stepForward: () => void
   stepBackward: () => void
+  runToFunctionEnd: () => void
   advanceAuto: () => void
   jumpTo: (step: number) => void
   reset: () => void
@@ -43,29 +50,45 @@ interface SimulatorStore {
   setSpeed: (speed: PlaybackSpeed) => void
   selectScenario: (id: string) => void
   setDebugFill: (enabled: boolean) => void
+  setLayout: (layout: WorkspaceLayout) => void
   focusVariable: (target: FocusTarget) => void
   clearFocus: () => void
+  inspectInstruction: (id: string | null) => void
 }
 
-const initialScenario = getScenario(DEFAULT_SCENARIO_ID)
+const searchParams = new URLSearchParams(
+  typeof window === 'undefined' ? '' : window.location.search,
+)
+
+const initialScenario = getScenario(searchParams.get('case') ?? DEFAULT_SCENARIO_ID)
 const initialDebugFill = true
 const initialTimeline = buildTimeline(initialScenario, {
   debugFill: initialDebugFill,
 })
+const requestedStep = Number.parseInt(searchParams.get('step') ?? '', 10)
+const initialStep = Number.isFinite(requestedStep)
+  ? Math.max(0, Math.min(initialTimeline.length - 1, requestedStep))
+  : 0
+const requestedLayout = searchParams.get('layout')
+const initialLayout: WorkspaceLayout =
+  requestedLayout === 'learn' || requestedLayout === 'dynamic' ? requestedLayout : 'dynamic'
 
 export const useSimulatorStore = create<SimulatorStore>((set, get) => ({
   scenarioId: initialScenario.id,
   scenario: initialScenario,
   debugFill: initialDebugFill,
+  layout: initialLayout,
   timeline: initialTimeline,
-  currentStep: 0,
+  currentStep: initialStep,
   totalSteps: initialTimeline.length - 1,
-  direction: 'reset',
+  direction: initialStep > 0 ? 'forward' : 'reset',
   isPlaying: false,
   speed: 1,
   focusAddress: null,
   focusRegister: null,
   focusLabel: null,
+  inspectedInstructionId: null,
+  inspectedAtStep: null,
   scenarios: SCENARIOS,
 
   stepForward: () => {
@@ -87,6 +110,30 @@ export const useSimulatorStore = create<SimulatorStore>((set, get) => ({
     set({
       currentStep: currentStep - 1,
       direction: 'back',
+      isPlaying: false,
+      focusAddress: null,
+      focusRegister: null,
+      focusLabel: null,
+    })
+  },
+
+  runToFunctionEnd: () => {
+    const { currentStep, totalSteps, scenario } = get()
+    if (currentStep >= totalSteps) return
+    const next = scenario.instructions[currentStep]
+    if (!next) return
+    const functionId = next.functionId
+    let target = totalSteps
+    for (let index = currentStep; index < scenario.instructions.length; index += 1) {
+      if (scenario.instructions[index].functionId !== functionId) {
+        target = index
+        break
+      }
+    }
+    if (target <= currentStep) return
+    set({
+      currentStep: target,
+      direction: 'forward',
       isPlaying: false,
       focusAddress: null,
       focusRegister: null,
@@ -182,6 +229,8 @@ export const useSimulatorStore = create<SimulatorStore>((set, get) => ({
     })
   },
 
+  setLayout: (layout) => set({ layout }),
+
   focusVariable: (target) =>
     set({
       focusAddress: target.address ?? null,
@@ -195,4 +244,10 @@ export const useSimulatorStore = create<SimulatorStore>((set, get) => ({
       focusRegister: null,
       focusLabel: null,
     }),
+
+  inspectInstruction: (id) =>
+    set((state) => ({
+      inspectedInstructionId: id,
+      inspectedAtStep: id === null ? null : state.currentStep,
+    })),
 }))

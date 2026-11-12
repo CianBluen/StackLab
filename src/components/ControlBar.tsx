@@ -4,6 +4,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  SkipForward,
 } from 'lucide-react'
 import type { PlaybackSpeed } from '../simulator/types'
 import { useSimulatorStore } from '../store/simulatorStore'
@@ -17,6 +18,7 @@ export const ControlBar = () => {
   const speed = useSimulatorStore((state) => state.speed)
   const stepForward = useSimulatorStore((state) => state.stepForward)
   const stepBackward = useSimulatorStore((state) => state.stepBackward)
+  const runToFunctionEnd = useSimulatorStore((state) => state.runToFunctionEnd)
   const togglePlay = useSimulatorStore((state) => state.togglePlay)
   const reset = useSimulatorStore((state) => state.reset)
   const setSpeed = useSimulatorStore((state) => state.setSpeed)
@@ -79,6 +81,17 @@ export const ControlBar = () => {
         >
           下一步
           <ChevronRight size={14} strokeWidth={2.3} />
+        </button>
+
+        <button
+          type="button"
+          className="ctrl-btn"
+          onClick={runToFunctionEnd}
+          disabled={finished}
+          title="连续执行到当前函数返回（跳过函数体单步）"
+        >
+          <SkipForward size={13} strokeWidth={2} />
+          到函数结束
         </button>
 
         <button

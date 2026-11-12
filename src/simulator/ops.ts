@@ -34,6 +34,7 @@ export interface CellSeed {
   variable?: string | null
   fillKind?: MemoryFill
   isAlignment?: boolean
+  sourceInstruction?: string | null
 }
 
 export interface InitialStateOptions {
@@ -61,6 +62,8 @@ const createEmptyCell = (address: number): MemoryCell => ({
   fillKind: null,
   variable: null,
   isAlignment: false,
+  size: CELL_SIZE,
+  sourceInstruction: null,
 })
 
 export const createInitialState = ({
@@ -125,6 +128,7 @@ export const createInitialState = ({
       variable: seed.variable ?? null,
       fillKind: seed.fillKind ?? null,
       isAlignment: seed.isAlignment ?? false,
+      sourceInstruction: seed.sourceInstruction ?? null,
     })
   }
 
@@ -179,6 +183,8 @@ export const writeCell = (
     variable: null,
     isAlignment: false,
     frameId: null,
+    size: CELL_SIZE,
+    sourceInstruction: null,
     ...patch,
   })
   return cell
@@ -263,9 +269,10 @@ export const popRegister = (
 export const pushEbp = (state: SimulatorState): number => {
   const frame = activeFrame(state)
   const frameId = frame?.id ?? null
+  const label = frame ? `${frame.name} 保存的旧 EBP` : '保存的旧 EBP'
   const address = pushValue(state, state.ebp, {
     type: 'saved-ebp',
-    label: '保存的 EBP',
+    label,
     frameId,
   })
   state.lastEffect = {
@@ -452,7 +459,7 @@ export const callFunction = (
 
   pushValue(state, meta.returnAddress, {
     type: 'return',
-    label: '返回地址',
+    label: `${meta.name} 返回地址`,
     frameId: calleeId,
   })
 
@@ -475,6 +482,7 @@ export const callFunction = (
     callerId,
     status: meta.usesFramePointer === false ? 'active' : 'creating',
     argsBytes: meta.argsBytes,
+    createdStep: state.currentInstructionIndex + 1,
   }
 
   state.callStack.push(frame)

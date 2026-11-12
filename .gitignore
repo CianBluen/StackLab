@@ -7,3 +7,6 @@ dist-ssr
 !.vscode/extensions.json
 npm-debug.log*
 *.tsbuildinfo
+.verify
+.shots
+.tmp-shots

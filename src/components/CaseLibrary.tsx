@@ -121,6 +121,9 @@ export const CaseLibrary = ({ open, onClose }: CaseLibraryProps) => {
                         <GraduationCap size={9} />
                         教学示意
                       </span>
+                      {scenario.id === 'startup' && (
+                        <span className="case-start-chip">零起点 · 从内核开始</span>
+                      )}
                       {active && (
                         <span className="case-active-mark">
                           <Check size={9} strokeWidth={3} />
@@ -158,7 +161,7 @@ export const CaseLibrary = ({ open, onClose }: CaseLibraryProps) => {
                 <ArrowRight size={12} className="mt-[2px] shrink-0 text-[#b28cff]" />
                 <p>
                   <strong>汇编来源说明：</strong>
-                  当前 6 个案例均为逐条核对的教学示意汇编，<b>不是</b> GCC / Clang / MSVC
+                  所有内置案例都是逐条核对的教学示意汇编，<b>不是</b> GCC / Clang / MSVC
                   的实时编译输出。真实编译器模式（输入 C、实时生成汇编并导入模拟器）尚未接入；界面中的编译器档案会明确标注这一点。
                 </p>
               </div>

@@ -4,7 +4,6 @@ import {
   Bug,
   Info,
   Layers3,
-  X,
 } from 'lucide-react'
 import {
   useEffect,
@@ -14,7 +13,6 @@ import {
 } from 'react'
 import { useSimulatorStore } from '../store/simulatorStore'
 import {
-  CELL_SIZE,
   type MemoryCell,
   type SimulatorState,
   type StackFrame,
@@ -22,49 +20,17 @@ import {
 } from '../simulator/types'
 import { hexAddress, hexWord } from '../simulator/utils'
 import { frameToneMeta, memoryTypeMeta } from '../ui/meta'
+import {
+  changedAddresses,
+  frameForCell,
+  frameLabel,
+  rowIndexForAddress,
+} from '../ui/stack'
+import { CellInspector } from './CellInspector'
 import { PanelHeader } from './PanelHeader'
 
 const ROW_HEIGHT = 40
 const POINTER_HEIGHT = 26
-
-const rowIndexForAddress = (address: number, stackTop: number): number =>
-  Math.max(0, Math.round((stackTop - address) / CELL_SIZE))
-
-const getChangedAddresses = (
-  state: SimulatorState,
-  neighbor: SimulatorState | null,
-): Set<number> => {
-  const changed = new Set<number>()
-  if (!neighbor) return changed
-  for (const cell of state.memory) {
-    const before = neighbor.memory.find((item) => item.address === cell.address)
-    if (
-      !before ||
-      before.value !== cell.value ||
-      before.isAllocated !== cell.isAllocated ||
-      before.isInitialized !== cell.isInitialized ||
-      before.fillKind !== cell.fillKind ||
-      before.type !== cell.type ||
-      before.label !== cell.label ||
-      before.isFreed !== cell.isFreed
-    ) {
-      changed.add(cell.address)
-    }
-  }
-  return changed
-}
-
-const frameForCell = (
-  state: SimulatorState,
-  cell: MemoryCell,
-): StackFrame | null => {
-  if (!cell.frameId) return null
-  return (
-    state.callStack.find((frame) => frame.id === cell.frameId) ??
-    state.archivedFrames.find((frame) => frame.id === cell.frameId) ??
-    null
-  )
-}
 
 interface RowProps {
   cell: MemoryCell
@@ -74,7 +40,7 @@ interface RowProps {
   step: number
   focused: boolean
   setRowRef: (address: number, node: HTMLDivElement | null) => void
-  onFillClick: (cell: MemoryCell) => void
+  onInspect: (cell: MemoryCell) => void
 }
 
 const MemoryRow = ({
@@ -85,7 +51,7 @@ const MemoryRow = ({
   step,
   focused,
   setRowRef,
-  onFillClick,
+  onInspect,
 }: RowProps) => {
   const frame = frameForCell(state, cell)
   const typeMeta = memoryTypeMeta[cell.type]
@@ -98,6 +64,8 @@ const MemoryRow = ({
   const isEsp = state.callStack.some((item) => item.currentESP === cell.address)
   const isEbp = state.callStack.some((item) => item.frameBase === cell.address)
   const isEffectAddress = effect?.addresses.includes(cell.address) ?? false
+  const isCallTarget =
+    effect?.kind === 'call' && effect.addresses.includes(cell.address)
   const flashTone = !changed
     ? null
     : !cell.isAllocated
@@ -113,10 +81,6 @@ const MemoryRow = ({
     '--frame-tone': tone?.color ?? '#6f839c',
   } as CSSProperties
 
-  const handleClick = () => {
-    if (isFill) onFillClick(cell)
-  }
-
   return (
     <div
       ref={(node) => setRowRef(cell.address, node)}
@@ -128,12 +92,13 @@ const MemoryRow = ({
       data-esp={isEsp}
       data-ebp={isEbp}
       data-effect={isEffectAddress}
+      data-call={isCallTarget}
       data-focused={focused}
       style={style}
-      onClick={handleClick}
+      onClick={() => onInspect(cell)}
       title={`${hexAddress(cell.address)} · ${cell.label}${
-        isFill ? ' · 点击查看 Debug Fill 说明' : ''
-      }`}
+        cell.sourceInstruction ? ` · 来源：${cell.sourceInstruction}` : ''
+      } · 点击查看完整来源`}
     >
       <div aria-hidden="true" />
 
@@ -174,6 +139,7 @@ const MemoryRow = ({
           <>
             <span className="stack2-valid-dot" />
             <span className="stack2-hex">{hexWord(cell.value)}</span>
+            {isCallTarget && <span className="stack2-call-tag">CALL 压入</span>}
             <span className="stack2-annotation">{cell.label}</span>
           </>
         ) : cell.isAllocated ? (
@@ -236,9 +202,13 @@ const PointerChip = ({
     initial={false}
     animate={{ y: marker.y }}
     transition={{ type: 'spring', stiffness: 270, damping: 30, mass: 0.72 }}
-    title={`${marker.frame.name}() 的 ${marker.side.toUpperCase()} 历史快照：${hexAddress(marker.address)}`}
+    title={`${frameLabel(marker.frame.name)} · ${marker.side.toUpperCase()} ${
+      marker.current ? '当前值' : '历史快照（调用现场）'
+    } ${hexAddress(marker.address)}${
+      marker.frame.createdStep ? ` · 记录于第 ${marker.frame.createdStep} 步` : ''
+    }`}
   >
-    <span className="stack2-pointer-frame">{marker.frame.name}()</span>
+    <span className="stack2-pointer-frame">{frameLabel(marker.frame.name)}</span>
     <span className="stack2-pointer-name">{marker.side.toUpperCase()}</span>
     <span className="stack2-pointer-value">{hexAddress(marker.address)}</span>
     <span className="stack2-pointer-arrow" />
@@ -249,10 +219,12 @@ const TransferToken = ({
   effect,
   step,
   stackTop,
+  rowHeight,
 }: {
   effect: StepEffect | null
   step: number
   stackTop: number
+  rowHeight: number
 }) => {
   if (!effect || effect.addresses.length === 0) return null
   if (
@@ -265,7 +237,7 @@ const TransferToken = ({
   if (effect.kind === 'release' && effect.addresses.length > 1) return null
 
   const address = effect.addresses[0]
-  const targetY = rowIndexForAddress(address, stackTop) * ROW_HEIGHT + 7
+  const targetY = rowIndexForAddress(address, stackTop) * rowHeight + 7
   const downward = ['push', 'call', 'write', 'fill', 'allocate'].includes(
     effect.kind,
   )
@@ -294,17 +266,19 @@ const TransferToken = ({
 const FrameBox = ({
   frame,
   state,
+  rowHeight,
   ghost,
 }: {
   frame: StackFrame
   state: SimulatorState
+  rowHeight: number
   ghost?: boolean
 }) => {
   if (frame.size <= 0) return null
   const topIndex = rowIndexForAddress(frame.stackEnd, state.stackTop)
   const bottomIndex = rowIndexForAddress(frame.stackStart, state.stackTop)
-  const top = topIndex * ROW_HEIGHT + 1
-  const height = Math.max(ROW_HEIGHT - 2, (bottomIndex - topIndex + 1) * ROW_HEIGHT - 2)
+  const top = topIndex * rowHeight + 1
+  const height = Math.max(rowHeight - 2, (bottomIndex - topIndex + 1) * rowHeight - 2)
   const tone = frameToneMeta[frame.tone]
   const saved = Object.keys(frame.savedRegisters)
   const current = state.callStack[state.callStack.length - 1]?.id === frame.id
@@ -327,7 +301,7 @@ const FrameBox = ({
     >
       <div className="stack2-frame-label">
         <span className="stack2-frame-label-name">
-          {frame.name}()
+          {frameLabel(frame.name)}
           {ghost && <em>已释放</em>}
         </span>
         <span className="stack2-frame-label-range">
@@ -343,6 +317,7 @@ const FrameBox = ({
   )
 }
 
+
 export const StackMemory = () => {
   const scenario = useSimulatorStore((state) => state.scenario)
   const currentStep = useSimulatorStore((state) => state.currentStep)
@@ -354,7 +329,10 @@ export const StackMemory = () => {
   )
   const focusAddress = useSimulatorStore((store) => store.focusAddress)
   const focusLabel = useSimulatorStore((store) => store.focusLabel)
-  const [fillNote, setFillNote] = useState<MemoryCell | null>(null)
+  const focusVariable = useSimulatorStore((store) => store.focusVariable)
+  const [inspect, setInspect] = useState<MemoryCell | null>(null)
+
+  const rowHeight = ROW_HEIGHT
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const rowRefs = useRef<Record<number, HTMLDivElement | null>>({})
@@ -364,7 +342,7 @@ export const StackMemory = () => {
     direction === 'back' && currentStep < totalSteps
       ? timeline[currentStep + 1].state
       : previous
-  const changed = getChangedAddresses(state, animationNeighbor)
+  const changed = changedAddresses(state, animationNeighbor)
   const effect = state.lastEffect
 
   const activeFrames = state.callStack.filter((frame) => frame.size > 0)
@@ -381,8 +359,8 @@ export const StackMemory = () => {
     const current =
       index === state.callStack.length - 1 && frame.status !== 'closing'
     const espY =
-      rowIndexForAddress(frame.currentESP, state.stackTop) * ROW_HEIGHT +
-      (ROW_HEIGHT - POINTER_HEIGHT) / 2
+      rowIndexForAddress(frame.currentESP, state.stackTop) * rowHeight +
+      (rowHeight - POINTER_HEIGHT) / 2
     espMarkers.push({
       key: `${frame.id}-esp`,
       frame,
@@ -393,8 +371,8 @@ export const StackMemory = () => {
     })
     if (frame.frameBase !== null) {
       const ebpY =
-        rowIndexForAddress(frame.frameBase, state.stackTop) * ROW_HEIGHT +
-        (ROW_HEIGHT - POINTER_HEIGHT) / 2
+        rowIndexForAddress(frame.frameBase, state.stackTop) * rowHeight +
+        (rowHeight - POINTER_HEIGHT) / 2
       ebpMarkers.push({
         key: `${frame.id}-ebp`,
         frame,
@@ -423,7 +401,7 @@ export const StackMemory = () => {
     const row = rowRefs.current[address]
     if (!container || !row) return
     const rowTop = row.offsetTop
-    const rowBottom = rowTop + ROW_HEIGHT
+    const rowBottom = rowTop + row.offsetHeight
     const viewTop = container.scrollTop
     const viewBottom = viewTop + container.clientHeight
     if (rowTop < viewTop + 8) {
@@ -447,7 +425,7 @@ export const StackMemory = () => {
   }, [focusAddress])
 
   useEffect(() => {
-    setFillNote(null)
+    setInspect(null)
   }, [currentStep, scenario.id])
 
   const legendTypes = [
@@ -499,12 +477,14 @@ export const StackMemory = () => {
                 data-current={index === state.callStack.length - 1}
                 key={frame.id}
                 style={{ '--frame-color': tone.color } as CSSProperties}
-                title={`${frame.name}() 栈帧 · EBP ${
+                title={`${frameLabel(frame.name)} 栈帧 · EBP ${
                   frame.frameBase === null ? '未建立' : hexAddress(frame.frameBase)
-                } · ESP ${hexAddress(frame.currentESP)}`}
+                } · ESP ${hexAddress(frame.currentESP)}${
+                  frame.createdStep ? ` · 第 ${frame.createdStep} 步进入` : ''
+                }`}
               >
                 <span className="stack2-frame-ribbon-dot" />
-                <b>{frame.name}()</b>
+                <b>{frameLabel(frame.name)}</b>
                 {frame.size > 0 ? (
                   <>
                     <span>
@@ -522,12 +502,21 @@ export const StackMemory = () => {
       </div>
 
       <div className="stack-scroll stack2-scroll" ref={scrollRef}>
-        <div className="stack2-surface">
+        <div
+          className="stack2-surface"
+          style={{ '--stack-row-h': `${rowHeight}px` } as CSSProperties}
+        >
           {ghostFrames.map((frame) => (
-            <FrameBox key={`ghost-${frame.id}`} frame={frame} state={state} ghost />
+            <FrameBox
+              key={`ghost-${frame.id}`}
+              frame={frame}
+              state={state}
+              rowHeight={rowHeight}
+              ghost
+            />
           ))}
           {activeFrames.map((frame) => (
-            <FrameBox key={frame.id} frame={frame} state={state} />
+            <FrameBox key={frame.id} frame={frame} state={state} rowHeight={rowHeight} />
           ))}
 
           {state.memory.map((cell) => (
@@ -540,7 +529,14 @@ export const StackMemory = () => {
               step={currentStep}
               focused={focusAddress === cell.address}
               setRowRef={setRowRef}
-              onFillClick={(target) => setFillNote(target)}
+              onInspect={(target) => {
+                // 点击既是“查看来源”，也把该地址设为联动焦点，方便参考图标注绑定。
+                focusVariable({
+                  address: target.address,
+                  label: `${hexAddress(target.address)} · ${target.label}`,
+                })
+                setInspect(target)
+              }}
             />
           ))}
 
@@ -565,7 +561,12 @@ export const StackMemory = () => {
           </div>
 
           {direction === 'forward' && (
-            <TransferToken effect={effect} step={currentStep} stackTop={state.stackTop} />
+            <TransferToken
+              effect={effect}
+              step={currentStep}
+              stackTop={state.stackTop}
+              rowHeight={rowHeight}
+            />
           )}
         </div>
       </div>
@@ -583,29 +584,13 @@ export const StackMemory = () => {
       </div>
 
       <AnimatePresence>
-        {fillNote && (
-          <motion.div
-            className="stack2-fill-note"
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-          >
-            <button type="button" onClick={() => setFillNote(null)} aria-label="关闭说明">
-              <X size={12} />
-            </button>
-            <div className="stack2-fill-note-title">
-              <Bug size={11} />
-              0xCCCCCCCC · Debug Stack Fill
-            </div>
-            <p>
-              {hexAddress(fillNote.address)} 在 <code>sub esp</code> 时被预留，但程序还没有写入它。
-              0xCCCCCCCC 是 MSVC 调试运行库常见的未初始化栈填充值，不是 CPU 或 x86 ABI 的硬件规则。
-              当程序真正执行 <code>mov [ebp−n], ...</code> 时，该单元才会变成变量数据。
-            </p>
-            <p className="text-[8.5px] text-[#627991]">
-              其他调试器/分配器可能使用 0xCDCDCDCD、0xFEEEFEEE 等不同填充值。
-            </p>
-          </motion.div>
+        {inspect && (
+          <CellInspector
+            key={`${inspect.address}-${currentStep}`}
+            state={state}
+            cell={inspect}
+            onClose={() => setInspect(null)}
+          />
         )}
       </AnimatePresence>
 

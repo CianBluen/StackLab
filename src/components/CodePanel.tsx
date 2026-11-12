@@ -31,6 +31,15 @@ export const CodePanel = () => {
   const state = useSimulatorStore(
     (store) => store.timeline[store.currentStep].state,
   )
+  const inspectedInstructionId = useSimulatorStore(
+    (store) => store.inspectedInstructionId,
+  )
+  const inspectedAtStep = useSimulatorStore((store) => store.inspectedAtStep)
+  const inspectInstruction = useSimulatorStore((store) => store.inspectInstruction)
+  const inspected =
+    inspectedInstructionId !== null && inspectedAtStep === currentStep
+      ? inspectedInstructionId
+      : null
   const finished = state.finished
   const upcoming =
     currentStep < totalSteps ? scenario.instructions[currentStep] : null
@@ -91,6 +100,9 @@ export const CodePanel = () => {
               >
                 <b>{group.name}</b>
                 <span>@ {hex(group.baseAddress)}</span>
+                {group.instructions[0]?.isSystemAction && (
+                  <span className="code-system-chip">系统动作</span>
+                )}
                 <span className="ml-auto normal-case tracking-normal text-[#526982]">
                   {group.instructions.length} 条
                 </span>
@@ -118,7 +130,14 @@ export const CodePanel = () => {
                     }}
                     className="code-line"
                     data-state={status}
-                    title={instruction.title}
+                    data-system={instruction.isSystemAction}
+                    data-inspected={inspected === instruction.id}
+                    title={`${instruction.title} · 点击查看解释`}
+                    onClick={() =>
+                      inspectInstruction(
+                        inspected === instruction.id ? null : instruction.id,
+                      )
+                    }
                   >
                     {current && (
                       <motion.div
@@ -157,6 +176,9 @@ export const CodePanel = () => {
                         <AsmText assembly={instruction.assembly} />
                       </span>
                       <span className="code-cn block">{instruction.title}</span>
+                      {instruction.isSystemAction && (
+                        <span className="code-system-inline">内核 · 非 x86 指令</span>
+                      )}
                     </span>
 
                     {next && (

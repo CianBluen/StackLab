@@ -20,27 +20,8 @@ import {
   resolveScenarioVariables,
   type ResolvedVariable,
 } from '../ui/variables'
+import { CodeText } from './CodeText'
 import { PanelHeader } from './PanelHeader'
-
-const KEYWORDS = new Set([
-  'int',
-  'char',
-  'void',
-  'return',
-  'if',
-  'else',
-  'for',
-  'while',
-  'static',
-  'const',
-  'unsigned',
-  'long',
-  'short',
-  'struct',
-])
-
-const tokenPattern =
-  /([A-Za-z_]\w*|0x[0-9A-Fa-f]+|\d+|"[^"]*"|\s+|[^\sA-Za-z0-9_]+)/g
 
 const variableAvailabilityClass = (
   resolved: ResolvedVariable | undefined,
@@ -50,70 +31,6 @@ const variableAvailabilityClass = (
   if (resolved.availability === 'register') return 'is-register'
   if (resolved.availability === 'uninitialized') return 'is-uninit'
   return 'is-dim'
-}
-
-const CodeLine = ({
-  text,
-  variables,
-  onVariable,
-}: {
-  text: string
-  variables: CVariable[]
-  onVariable: (variable: CVariable) => void
-}) => {
-  const tokens = text.match(tokenPattern) ?? []
-  return (
-    <>
-      {tokens.map((token, index) => {
-        if (/^\s+$/.test(token)) {
-          return <span key={`space-${index}`}>{token}</span>
-        }
-        if (KEYWORDS.has(token)) {
-          return (
-            <span className="c-keyword" key={`${token}-${index}`}>
-              {token}
-            </span>
-          )
-        }
-        if (/^0x[0-9A-Fa-f]+$|^\d+$/.test(token)) {
-          return (
-            <span className="c-number" key={`${token}-${index}`}>
-              {token}
-            </span>
-          )
-        }
-        if (/^"/.test(token)) {
-          return (
-            <span className="c-string" key={`${token}-${index}`}>
-              {token}
-            </span>
-          )
-        }
-        const variable = variables.find((candidate) => candidate.name === token)
-        if (variable) {
-          return (
-            <button
-              type="button"
-              key={`${token}-${index}`}
-              className={`c-variable ${variable.storage === 'register' ? 'is-register' : 'is-stack'}`}
-              onClick={() => onVariable(variable)}
-              title={`点击定位变量 ${variable.name}`}
-            >
-              {token}
-            </button>
-          )
-        }
-        if (/^[A-Za-z_]\w*$/.test(token)) {
-          return (
-            <span className="c-ident" key={`${token}-${index}`}>
-              {token}
-            </span>
-          )
-        }
-        return <span key={`${token}-${index}`}>{token}</span>
-      })}
-    </>
-  )
 }
 
 export const SourcePanel = () => {
@@ -264,7 +181,7 @@ export const SourcePanel = () => {
                 <span className="c-line-number">{String(line.number).padStart(2, '0')}</span>
                 <span className="c-line-marker" />
                 <code className="c-line-text">
-                  <CodeLine
+                  <CodeText
                     text={line.text}
                     variables={lineVariables}
                     onVariable={handleVariable}
