@@ -28,7 +28,7 @@ http://127.0.0.1:5173/
 需要 Node.js 18+（本项目在 Node 24 上验证过）。
 
 ```bash
-cd G:\study\vibecoding\StackLab
+cd 项目地址
 npm install        # 第一次拉下来才需要
 npm run dev
 ```
